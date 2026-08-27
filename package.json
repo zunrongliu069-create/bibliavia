@@ -1,0 +1,42 @@
+{
+  "name": "scriptora",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "format": "prettier --write \"App.tsx\" \"src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"App.tsx\" \"src/**/*.{ts,tsx}\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:review": "vitest run src/lib/tokenize.test.ts src/lib/reviewQueue.test.ts src/lib/scheduler.test.ts src/lib/adaptiveGrade.test.ts",
+    "test:chests": "vitest run src/lib/rewards.test.ts",
+    "test:watch": "vitest",
+    "verify": "npm run format:check && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^15.1.1",
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@supabase/supabase-js": "2.112.4",
+    "expo": "~57.0.15",
+    "expo-auth-session": "~57.0.9",
+    "expo-font": "~57.0.1",
+    "expo-localization": "~57.0.1",
+    "expo-status-bar": "~57.0.1",
+    "expo-web-browser": "~57.0.2",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-web": "~0.21.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "prettier": "^3.6.2",
+    "typescript": "~5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

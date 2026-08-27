@@ -1,0 +1,1674 @@
+import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Animated,
+  Easing,
+  Image,
+  ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { Button, ProgressBar } from '../components/ui';
+import { characterById } from '../data/characters';
+import { chestImageForTier } from '../data/chests';
+import {
+  exactSentenceChoice,
+  finishSentenceChoice,
+  nextVerseChoice,
+  recommendedMode,
+  understandingChoices,
+  verseMatchPairs,
+  wordChoice,
+} from '../lib/exercise';
+import { inferReviewGrade } from '../lib/adaptiveGrade';
+import { t } from '../lib/i18n';
+import { learningSequence, nextVerseAfter } from '../lib/learningSequence';
+import { lessonOutcome } from '../lib/lessonOutcome';
+import { chestTierAfterTap, lessonChestTierForStage } from '../lib/rewards';
+import {
+  blankExercise,
+  normalizeRecall,
+  recallAccuracy,
+  reorderedWords,
+  shortRecallExercise,
+  tokenize,
+} from '../lib/tokenize';
+import { colors, radius } from '../theme';
+import type {
+  ChestLoot,
+  ChestReward,
+  ExerciseMode,
+  ReviewGrade,
+  UiLanguage,
+  Verse,
+} from '../types';
+import type { ReviewMode } from '../lib/reviewQueue';
+import { useAppStore } from '../store/AppStore';
+
+type SpeechRecognitionLike = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult?: (event: {
+    results: ArrayLike<{ 0: { transcript: string } }>;
+    resultIndex: number;
+  }) => void;
+  onerror?: () => void;
+  onend?: () => void;
+  start: () => void;
+  stop: () => void;
+};
+const lessonModes: ExerciseMode[] = [
+  'read',
+  'finish',
+  'initials',
+  'choice',
+  'sentenceCheck',
+  'reorder',
+  'match',
+  'contextChoice',
+  'speak',
+  'recall',
+];
+const lessonXp = [4, 5, 11, 3, 3, 5, 4, 3, 5, 7];
+const stageTotals = [20, 35, 50];
+const lessonWorld = require('../../assets/game/scriptora-path-world.png');
+const stageForExercise = (index: number) => (index < 3 ? 0 : index < 7 ? 1 : 2);
+
+export function ReviewScreen({
+  initialVerse,
+  reviewVerses = [initialVerse],
+  kind,
+  onClose,
+}: {
+  initialVerse: Verse;
+  reviewVerses?: Verse[];
+  kind: 'lesson' | ReviewMode;
+  onClose: () => void;
+}) {
+  const store = useAppStore();
+  const [lessonVerse, setLessonVerse] = useState(initialVerse);
+  const lessonId = lessonVerse.id;
+  const resumeIndex =
+    kind === 'lesson' ? Math.max(0, Math.min(9, store.progress.lessonProgress[lessonId] ?? 0)) : 0;
+  const [phase, setPhase] = useState<'intro' | 'practice' | 'checkpoint' | 'reward'>('intro');
+  const [pendingChestTier, setPendingChestTier] = useState(1);
+  const [sessionScores, setSessionScores] = useState<number[]>([]);
+  const [exerciseIndex, setExerciseIndex] = useState(resumeIndex);
+  const [combo, setCombo] = useState(0);
+  const [hearts, setHearts] = useState(3);
+  const [verse, setVerse] = useState(initialVerse);
+  const sequence = useMemo(() => learningSequence(store.availableVerses), [store.availableVerses]);
+  const reviewSequence = kind === 'lesson' ? [] : reviewVerses;
+  const currentIndex =
+    kind !== 'lesson'
+      ? Math.max(
+          0,
+          reviewSequence.findIndex((item) => item.id === verse.id),
+        )
+      : exerciseIndex;
+  const sessionCount = kind === 'lesson' ? 10 : reviewSequence.length;
+  const mastery = store.progress.mastery[verse.id];
+  const [mode, setMode] = useState<ExerciseMode>(() =>
+    kind === 'lesson'
+      ? lessonModes[resumeIndex]!
+      : recommendedMode(store.progress.mastery[initialVerse.id]),
+  );
+  const [answer, setAnswer] = useState('');
+  const [reorderSelection, setReorderSelection] = useState<number[]>([]);
+  const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
+  const [selectedPairLeft, setSelectedPairLeft] = useState<string | null>(null);
+  const [selectedPairRight, setSelectedPairRight] = useState<string | null>(null);
+  const [matchedPairIds, setMatchedPairIds] = useState<string[]>([]);
+  const [pairMistakes, setPairMistakes] = useState(0);
+  const [revealed, setRevealed] = useState(false);
+  const [hints, setHints] = useState(0);
+  const [accuracy, setAccuracy] = useState(0);
+  const [suggestedGrade, setSuggestedGrade] = useState<ReviewGrade>('good');
+  const [minorDifferences, setMinorDifferences] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const startedAt = useRef(Date.now());
+  const sessionId = useRef(`${kind}-${lessonId}-${Date.now()}`);
+  const choice = useMemo(() => wordChoice(verse), [verse]);
+  const lightGaps = useMemo(() => blankExercise(verse.text, verse.languageTag, 0.35), [verse]);
+  const strongGaps = useMemo(() => blankExercise(verse.text, verse.languageTag, 0.65), [verse]);
+  const initialPhrase = useMemo(
+    () => shortRecallExercise(verse.text, verse.languageTag, 'start'),
+    [verse],
+  );
+  const keywordPhrase = useMemo(
+    () => shortRecallExercise(verse.text, verse.languageTag, 'middle'),
+    [verse],
+  );
+  const finishChoice = useMemo(() => finishSentenceChoice(verse), [verse]);
+  const sentenceChoice = useMemo(() => exactSentenceChoice(verse), [verse]);
+  const understanding = useMemo(() => understandingChoices(verse), [verse]);
+  const shuffled = useMemo(() => reorderedWords(verse.text, verse.languageTag), [verse]);
+  const sequenceIndex = sequence.findIndex((item) => item.id === verse.id);
+  const previousVerse = sequence[sequenceIndex - 1];
+  const nextVerse = sequence[sequenceIndex + 1];
+  const followingVerse = sequence[sequenceIndex + 2];
+  const contextChoice = useMemo(
+    () => nextVerseChoice(verse, nextVerse, followingVerse),
+    [verse, nextVerse, followingVerse],
+  );
+  const matchPairs = useMemo(
+    () =>
+      verseMatchPairs(
+        sequence.slice(Math.max(0, sequenceIndex), Math.max(0, sequenceIndex) + 3),
+        verse.languageTag,
+      ),
+    [sequence, sequenceIndex, verse.languageTag],
+  );
+  const matchRightOptions = useMemo(() => [...matchPairs].reverse(), [matchPairs]);
+  const recommended = recommendedMode(mastery);
+  const stageIndex = stageForExercise(exerciseIndex);
+  const stageLabel = [
+    t(store.uiLanguage, 'stageLearn'),
+    t(store.uiLanguage, 'stagePractice'),
+    t(store.uiLanguage, 'stageMaster'),
+  ][stageIndex]!;
+  const answerTarget =
+    mode === 'blanks'
+      ? lightGaps.answer
+      : mode === 'moreBlanks'
+        ? strongGaps.answer
+        : mode === 'initials'
+          ? initialPhrase.phrase
+          : mode === 'keywords'
+            ? keywordPhrase.phrase
+            : mode === 'context'
+              ? initialPhrase.phrase
+              : verse.text;
+  useEffect(() => {
+    if (Platform.OS === 'web') globalThis.scrollTo?.(0, 0);
+  }, [phase, exerciseIndex]);
+
+  const labels: Record<ExerciseMode, string> = {
+    read: t(store.uiLanguage, 'readMode'),
+    understand: t(store.uiLanguage, 'understandMode'),
+    listen: t(store.uiLanguage, 'listenMode'),
+    blanks: t(store.uiLanguage, 'blanksMode'),
+    moreBlanks: t(store.uiLanguage, 'moreBlanksMode'),
+    reorder: t(store.uiLanguage, 'reorderMode'),
+    choice: t(store.uiLanguage, 'choiceMode'),
+    finish: t(store.uiLanguage, 'finishMode'),
+    sentenceCheck: t(store.uiLanguage, 'sentenceCheckMode'),
+    match: t(store.uiLanguage, 'matchMode'),
+    contextChoice: t(store.uiLanguage, 'contextChoiceMode'),
+    initials: t(store.uiLanguage, 'initialsMode'),
+    keywords: t(store.uiLanguage, 'keywordsMode'),
+    recall: t(store.uiLanguage, 'recallMode'),
+    speak: t(store.uiLanguage, 'speakMode'),
+    context: t(store.uiLanguage, 'contextMode'),
+  };
+
+  const prompt = useMemo(() => {
+    if (mode === 'read') return verse.text;
+    if (mode === 'blanks')
+      return `${lightGaps.prompt}\n\n${t(store.uiLanguage, 'missingWordsOnly')}`;
+    if (mode === 'moreBlanks')
+      return `${strongGaps.prompt}\n\n${t(store.uiLanguage, 'missingWordsOnly')}`;
+    if (mode === 'initials')
+      return `${initialPhrase.initials}\n\n${t(store.uiLanguage, 'shortPhrasePrompt')}`;
+    if (mode === 'keywords')
+      return `${keywordPhrase.keywords}\n\n${t(store.uiLanguage, 'shortPhrasePrompt')}`;
+    if (mode === 'choice') return choice.prompt;
+    if (mode === 'finish') return finishChoice.prompt;
+    if (mode === 'sentenceCheck')
+      return `${sentenceChoice.statement}\n\n${t(store.uiLanguage, 'exactSentencePrompt')}`;
+    if (mode === 'match') return t(store.uiLanguage, 'matchPrompt');
+    if (mode === 'contextChoice')
+      return `${contextChoice.prompt}\n\n${t(store.uiLanguage, 'nextVerseChoicePrompt')}`;
+    if (mode === 'listen') return t(store.uiLanguage, 'listenPrompt');
+    if (mode === 'speak') return t(store.uiLanguage, 'speakPrompt');
+    if (mode === 'understand') return t(store.uiLanguage, 'understandingPrompt');
+    if (mode === 'context')
+      return previousVerse
+        ? `${previousVerse.reference}\n${previousVerse.text}\n\n${t(store.uiLanguage, 'contextShortPrompt')}`
+        : `${verse.reference}\n${t(store.uiLanguage, 'shortPhrasePrompt')}`;
+    if (mode === 'reorder') return t(store.uiLanguage, 'reorderPrompt');
+    return verse.reference;
+  }, [
+    mode,
+    verse,
+    choice,
+    finishChoice,
+    sentenceChoice,
+    contextChoice,
+    previousVerse,
+    lightGaps,
+    strongGaps,
+    initialPhrase,
+    keywordPhrase,
+    store.uiLanguage,
+  ]);
+
+  const hintText = useMemo(
+    () =>
+      tokenize(answerTarget, verse.languageTag)
+        .slice(0, Math.min(2 + hints * 2, 6))
+        .join(verse.languageTag.startsWith('zh') ? '' : ' '),
+    [answerTarget, verse.languageTag, hints],
+  );
+  const usesTextInput = ![
+    'read',
+    'understand',
+    'choice',
+    'finish',
+    'sentenceCheck',
+    'match',
+    'contextChoice',
+    'reorder',
+    'listen',
+  ].includes(mode);
+
+  const reorderAnswer = (indexes: number[]) =>
+    indexes
+      .map((index) => shuffled[index] ?? '')
+      .join(verse.languageTag.startsWith('zh') ? '' : ' ');
+  const resetAttempt = (nextMode: ExerciseMode) => {
+    setMode(nextMode);
+    setAnswer('');
+    setReorderSelection([]);
+    setSelectedChoice(null);
+    setSelectedPairLeft(null);
+    setSelectedPairRight(null);
+    setMatchedPairIds([]);
+    setPairMistakes(0);
+    setRevealed(false);
+    setHints(0);
+    setAccuracy(0);
+    setSuggestedGrade('good');
+    setMinorDifferences(false);
+    setListening(false);
+    startedAt.current = Date.now();
+  };
+  const addReorderToken = (index: number) => {
+    if (reorderSelection.includes(index)) return;
+    const next = [...reorderSelection, index];
+    setReorderSelection(next);
+    setAnswer(reorderAnswer(next));
+  };
+  const removeReorderToken = (position: number) => {
+    const next = reorderSelection.filter((_, index) => index !== position);
+    setReorderSelection(next);
+    setAnswer(reorderAnswer(next));
+  };
+  const chooseMatch = (side: 'left' | 'right', id: string) => {
+    const left = side === 'left' ? id : selectedPairLeft;
+    const right = side === 'right' ? id : selectedPairRight;
+    if (side === 'left') setSelectedPairLeft(id);
+    else setSelectedPairRight(id);
+    if (left && right) {
+      if (left === right) setMatchedPairIds((old) => (old.includes(left) ? old : [...old, left]));
+      else setPairMistakes((old) => old + 1);
+      setSelectedPairLeft(null);
+      setSelectedPairRight(null);
+    }
+  };
+  const openCurrentChest = (tier: number) => {
+    setPendingChestTier(tier);
+    setPhase('reward');
+  };
+  const nextLessonVerse = nextVerseAfter(sequence, lessonVerse.id);
+  const startNextVerse = () => {
+    if (!nextLessonVerse) {
+      onClose();
+      return;
+    }
+    store.setLessonProgress(nextLessonVerse.id, 0);
+    if (nextLessonVerse.bookId !== lessonVerse.bookId) store.setCampaign(nextLessonVerse.bookId);
+    setLessonVerse(nextLessonVerse);
+    setVerse(nextLessonVerse);
+    setExerciseIndex(0);
+    setSessionScores([]);
+    setCombo(0);
+    setHearts(3);
+    sessionId.current = `lesson-${nextLessonVerse.id}-${Date.now()}`;
+    resetAttempt('read');
+    setPhase('practice');
+  };
+  const reveal = () => {
+    const recallMs = Date.now() - startedAt.current;
+    const score =
+      mode === 'read'
+        ? 1
+        : mode === 'understand'
+          ? understanding.find((item) => item.label === selectedChoice)?.correct
+            ? 1
+            : 0
+          : mode === 'choice'
+            ? selectedChoice === choice.correct
+              ? 1
+              : 0
+            : mode === 'finish'
+              ? selectedChoice === finishChoice.correct
+                ? 1
+                : 0
+              : mode === 'sentenceCheck'
+                ? selectedChoice === sentenceChoice.correct
+                  ? 1
+                  : 0
+                : mode === 'contextChoice'
+                  ? selectedChoice === contextChoice.correct
+                    ? 1
+                    : 0
+                  : mode === 'match'
+                    ? matchedPairIds.length / Math.max(1, matchPairs.length + pairMistakes)
+                    : recallAccuracy(answerTarget, answer);
+    const normalizedExpected = normalizeRecall(answerTarget).join(' ');
+    const normalizedAnswer = normalizeRecall(answer).join(' ');
+    const isRecallAnswer = usesTextInput;
+    setAccuracy(score);
+    setSuggestedGrade(
+      mode === 'read'
+        ? 'good'
+        : inferReviewGrade({
+            accuracy: score,
+            hintsUsed: hints,
+            recallMs,
+            wordCount: tokenize(answerTarget, verse.languageTag).length,
+          }),
+    );
+    setMinorDifferences(isRecallAnswer && score >= 0.9 && normalizedExpected !== normalizedAnswer);
+    setRevealed(true);
+  };
+  const grade = (gradeValue: ReviewGrade) => {
+    const score = mode === 'read' ? 1 : accuracy;
+    const { success } = lessonOutcome(gradeValue, score);
+    const fixedXp = success ? (kind !== 'lesson' ? 5 : (lessonXp[exerciseIndex] ?? 0)) : 0;
+    store.recordReview({
+      verse,
+      grade: gradeValue,
+      mode,
+      accuracy: score,
+      hintsUsed: hints,
+      recallMs: Date.now() - startedAt.current,
+      xpOverride: fixedXp,
+    });
+    setSessionScores((old) => [...old, score]);
+    setCombo((old) => (success ? old + 1 : 0));
+    if (!success) setHearts((old) => Math.max(0, old - 1));
+    if (kind !== 'lesson') {
+      const nextVerse = reviewSequence[currentIndex + 1];
+      if (!nextVerse) {
+        openCurrentChest(1);
+        return;
+      }
+      setVerse(nextVerse);
+      resetAttempt(recommendedMode(store.progress.mastery[nextVerse.id]));
+      return;
+    }
+    const nextIndex = exerciseIndex + 1;
+    store.setLessonProgress(lessonId, nextIndex >= 10 ? 0 : nextIndex);
+    setExerciseIndex(nextIndex);
+    if (nextIndex === 3 || nextIndex === 7 || nextIndex === 10) {
+      setPhase('checkpoint');
+      return;
+    }
+    resetAttempt(lessonModes[nextIndex]!);
+  };
+
+  const startSpeech = () => {
+    const root = globalThis as typeof globalThis & {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const Constructor = root.SpeechRecognition ?? root.webkitSpeechRecognition;
+    if (!Constructor) {
+      setAnswer('Speech recognition is not available in this browser.');
+      return;
+    }
+    const recognition = new Constructor();
+    recognition.lang = verse.languageTag;
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.onresult = (event) => {
+      const result = event.results[event.resultIndex];
+      if (result?.[0]?.transcript) setAnswer(result[0].transcript);
+    };
+    recognition.onerror = () => setListening(false);
+    recognition.onend = () => setListening(false);
+    recognitionRef.current = recognition;
+    setListening(true);
+    recognition.start();
+  };
+
+  if (phase === 'intro')
+    return (
+      <LessonIntro
+        verse={lessonVerse}
+        count={sessionCount}
+        language={store.uiLanguage}
+        kind={kind === 'lesson' ? 'lesson' : 'quick'}
+        resumeIndex={resumeIndex}
+        onStart={() => setPhase('practice')}
+        onClose={onClose}
+      />
+    );
+  if (phase === 'checkpoint') {
+    const completedStage = stageForExercise(Math.max(0, exerciseIndex - 1));
+    const checkpointChestTier = lessonChestTierForStage(completedStage);
+    return (
+      <StageCheckpoint
+        language={store.uiLanguage}
+        stageIndex={completedStage}
+        scores={sessionScores}
+        hearts={hearts}
+        onFinish={() => (checkpointChestTier ? openCurrentChest(checkpointChestTier) : onClose())}
+        onContinue={() => {
+          setHearts((old) => Math.min(3, old + 1));
+          if (exerciseIndex >= 10) {
+            openCurrentChest(lessonChestTierForStage(2)!);
+            return;
+          }
+          resetAttempt(lessonModes[exerciseIndex]!);
+          setPhase('practice');
+        }}
+      />
+    );
+  }
+  if (phase === 'reward')
+    return (
+      <ChestRewardScreen
+        language={store.uiLanguage}
+        baseTier={pendingChestTier}
+        seed={sessionId.current}
+        scores={sessionScores}
+        onReveal={(tier) => store.openChest(`${sessionId.current}-chest`, tier)}
+        nextVerse={kind === 'lesson' ? nextLessonVerse : undefined}
+        onNext={kind === 'lesson' ? startNextVerse : onClose}
+        onClose={onClose}
+      />
+    );
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ImageBackground
+        source={lessonWorld}
+        resizeMode="cover"
+        style={styles.adventureBackground}
+        imageStyle={styles.adventureImage}
+      >
+        <View style={styles.adventureScrim} />
+        <View style={styles.header}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={onClose}
+            style={styles.stopButton}
+            accessibilityLabel={t(store.uiLanguage, 'stopLesson')}
+          >
+            <Ionicons name="close" size={20} color="#FFD66B" />
+            <Text style={styles.stopText}>{t(store.uiLanguage, 'stopLesson')}</Text>
+          </Pressable>
+          {kind === 'lesson' && (
+            <View style={styles.hearts}>
+              <Ionicons name="heart" size={17} color="#FF8D7D" />
+              <Text style={styles.heartsText}>{hearts}/3</Text>
+            </View>
+          )}
+          <View style={styles.headerProgress}>
+            <ProgressBar value={(currentIndex + 1) / sessionCount} color="#A46BFF" />
+          </View>
+          <Text style={styles.sequenceCount}>
+            {currentIndex + 1}/{sessionCount}
+          </Text>
+        </View>
+        <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+          <View style={styles.practiceCard}>
+            <View style={styles.adaptive}>
+              <Ionicons
+                name={kind !== 'lesson' ? 'flash' : 'layers'}
+                size={18}
+                color={colors.primary}
+              />
+              <Text style={styles.adaptiveText}>
+                {kind !== 'lesson'
+                  ? t(
+                      store.uiLanguage,
+                      kind === 'quick'
+                        ? 'quickPractice'
+                        : kind === 'normal'
+                          ? 'normalReview'
+                          : 'fullReview',
+                    )
+                  : `${stageLabel} · ${labels[mode]}`}
+              </Text>
+              <Text style={styles.combo}>
+                {combo > 1 ? `${combo}× ${t(store.uiLanguage, 'combo')}` : ''}
+              </Text>
+            </View>
+            <View style={styles.referenceRow}>
+              <Text style={styles.referenceEyebrow}>{verse.reference.toUpperCase()}</Text>
+              <Text style={styles.stage}>{mastery?.stage ?? 'new'}</Text>
+            </View>
+            <View style={styles.masteryRow}>
+              <Strength
+                label={t(store.uiLanguage, 'recognition')}
+                value={mastery?.recognitionStrength ?? 0}
+                color={colors.gold}
+              />
+              <Strength
+                label={t(store.uiLanguage, 'recallStrength')}
+                value={mastery?.recallStrength ?? 0}
+                color={colors.mint}
+              />
+            </View>
+            <Text
+              selectable
+              style={[styles.prompt, verse.languageTag.startsWith('zh') && styles.chinese]}
+            >
+              {prompt}
+            </Text>
+            {mode === 'speak' && (
+              <Button
+                label={
+                  listening
+                    ? t(store.uiLanguage, 'stopListening')
+                    : t(store.uiLanguage, 'startListening')
+                }
+                variant="secondary"
+                onPress={() => (listening ? recognitionRef.current?.stop() : startSpeech())}
+              />
+            )}
+            {mode === 'understand' && (
+              <View style={styles.choices}>
+                {understanding.map((item) => (
+                  <Choice
+                    key={item.label}
+                    label={item.label}
+                    selected={selectedChoice === item.label}
+                    onPress={() => setSelectedChoice(item.label)}
+                  />
+                ))}
+              </View>
+            )}
+            {mode === 'choice' && (
+              <View style={styles.wordChoices}>
+                {choice.options.map((item) => (
+                  <Choice
+                    key={item}
+                    label={item}
+                    selected={selectedChoice === item}
+                    onPress={() => setSelectedChoice(item)}
+                  />
+                ))}
+              </View>
+            )}
+            {mode === 'finish' && (
+              <View style={styles.twoChoices}>
+                {finishChoice.options.map((item) => (
+                  <Choice
+                    key={item}
+                    label={item}
+                    selected={selectedChoice === item}
+                    onPress={() => setSelectedChoice(item)}
+                  />
+                ))}
+              </View>
+            )}
+            {mode === 'sentenceCheck' && (
+              <View style={styles.twoChoices}>
+                <Choice
+                  label={t(store.uiLanguage, 'yesExact')}
+                  selected={selectedChoice === 'yes'}
+                  onPress={() => setSelectedChoice('yes')}
+                />
+                <Choice
+                  label={t(store.uiLanguage, 'notExact')}
+                  selected={selectedChoice === 'no'}
+                  onPress={() => setSelectedChoice('no')}
+                />
+              </View>
+            )}
+            {mode === 'contextChoice' && (
+              <View style={styles.choices}>
+                {contextChoice.options.map((item) => (
+                  <Choice
+                    key={item}
+                    label={item}
+                    selected={selectedChoice === item}
+                    onPress={() => setSelectedChoice(item)}
+                  />
+                ))}
+              </View>
+            )}
+            {mode === 'match' && (
+              <View style={styles.matchGrid}>
+                <View style={styles.matchColumn}>
+                  {matchPairs.map((item) => (
+                    <Choice
+                      key={`l-${item.id}`}
+                      label={item.left}
+                      selected={selectedPairLeft === item.id || matchedPairIds.includes(item.id)}
+                      disabled={matchedPairIds.includes(item.id)}
+                      onPress={() => chooseMatch('left', item.id)}
+                    />
+                  ))}
+                </View>
+                <View style={styles.matchColumn}>
+                  {matchRightOptions.map((item) => (
+                    <Choice
+                      key={`r-${item.id}`}
+                      label={item.right}
+                      selected={selectedPairRight === item.id || matchedPairIds.includes(item.id)}
+                      disabled={matchedPairIds.includes(item.id)}
+                      onPress={() => chooseMatch('right', item.id)}
+                    />
+                  ))}
+                </View>
+              </View>
+            )}
+            {mode === 'reorder' && (
+              <>
+                <View style={styles.answerBuilder}>
+                  {reorderSelection.length ? (
+                    <View style={styles.selectedTokens}>
+                      {reorderSelection.map((tokenIndex, position) => (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${shuffled[tokenIndex]} · ${t(store.uiLanguage, 'removeWord')}`}
+                          key={`${tokenIndex}-${position}`}
+                          style={styles.selectedToken}
+                          onPress={() => removeReorderToken(position)}
+                        >
+                          <Text style={styles.selectedTokenText}>{shuffled[tokenIndex]}</Text>
+                          <Ionicons name="close-circle" size={16} color={colors.primary} />
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={styles.answerBuilderText}>…</Text>
+                  )}
+                </View>
+                <View style={styles.tokens}>
+                  {shuffled.map((word, index) => {
+                    const used = reorderSelection.includes(index);
+                    return (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={word}
+                        accessibilityState={{ disabled: used }}
+                        disabled={used}
+                        key={`${word}-${index}`}
+                        style={[styles.token, used && styles.tokenUsed]}
+                        onPress={() => addReorderToken(index)}
+                      >
+                        <Text style={styles.tokenText}>{word}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Button
+                  label={t(store.uiLanguage, 'clearAnswer')}
+                  variant="secondary"
+                  onPress={() => {
+                    setReorderSelection([]);
+                    setAnswer('');
+                  }}
+                />
+              </>
+            )}
+            {usesTextInput && (
+              <TextInput
+                multiline
+                value={answer}
+                onChangeText={setAnswer}
+                placeholder={
+                  mode === 'recall'
+                    ? t(store.uiLanguage, 'recallMode')
+                    : t(store.uiLanguage, 'shortAnswer')
+                }
+                placeholderTextColor={colors.muted}
+                style={[styles.input, verse.languageTag.startsWith('zh') && styles.chinese]}
+                autoCorrect={false}
+                accessibilityLabel="Your recalled verse"
+              />
+            )}
+            {hints > 0 && !revealed && (
+              <View style={styles.hint}>
+                <Ionicons name="bulb" color={colors.gold} size={19} />
+                <Text style={styles.hintText}>{hintText}…</Text>
+              </View>
+            )}
+            {!revealed ? (
+              <View style={styles.actions}>
+                {mode !== 'read' && !(kind === 'lesson' && exerciseIndex >= 7) && (
+                  <Button
+                    label={t(store.uiLanguage, 'showHint')}
+                    variant="secondary"
+                    onPress={() => setHints((old) => old + 1)}
+                  />
+                )}
+                <Button
+                  label={
+                    mode === 'read' ? t(store.uiLanguage, 'continue') : t(store.uiLanguage, 'check')
+                  }
+                  onPress={reveal}
+                />
+              </View>
+            ) : (
+              <View style={styles.answerPanel}>
+                <View style={styles.scoreRow}>
+                  <Text style={styles.answerTitle}>{t(store.uiLanguage, 'accuracy')}</Text>
+                  <Text
+                    style={[
+                      styles.score,
+                      {
+                        color:
+                          accuracy >= 0.9
+                            ? colors.mint
+                            : accuracy >= 0.6
+                              ? colors.gold
+                              : colors.coral,
+                      },
+                    ]}
+                  >
+                    {Math.round(accuracy * 100)}%
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.acceptance,
+                    {
+                      borderColor:
+                        accuracy >= 0.9
+                          ? colors.mint
+                          : accuracy >= 0.55
+                            ? colors.gold
+                            : colors.coral,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      accuracy >= 0.9
+                        ? 'checkmark-circle'
+                        : accuracy >= 0.55
+                          ? 'analytics'
+                          : 'refresh-circle'
+                    }
+                    size={20}
+                    color={
+                      accuracy >= 0.9 ? colors.mint : accuracy >= 0.55 ? colors.gold : colors.coral
+                    }
+                  />
+                  <Text style={styles.acceptanceText}>
+                    {mode === 'read'
+                      ? t(store.uiLanguage, 'stepComplete')
+                      : minorDifferences
+                        ? t(store.uiLanguage, 'acceptedMinor')
+                        : accuracy >= 0.9
+                          ? t(store.uiLanguage, 'acceptedCorrect')
+                          : accuracy >= 0.55
+                            ? t(store.uiLanguage, 'acceptedPractice')
+                            : t(store.uiLanguage, 'tryAgainSoon')}
+                  </Text>
+                </View>
+                {mode !== 'read' && (
+                  <Text
+                    selectable
+                    style={[
+                      styles.answerText,
+                      verse.languageTag.startsWith('zh') && styles.chinese,
+                    ]}
+                  >
+                    {usesTextInput && mode !== 'recall' && mode !== 'speak'
+                      ? answerTarget
+                      : verse.text}
+                  </Text>
+                )}
+                <Button
+                  label={`${t(store.uiLanguage, 'continue')} · ${t(store.uiLanguage, suggestedGrade)}`}
+                  onPress={() => grade(suggestedGrade)}
+                />
+                <Text style={styles.gradeHint}>{t(store.uiLanguage, 'adaptiveAssessment')}</Text>
+                <View style={styles.grades}>
+                  <Grade
+                    icon="refresh"
+                    label={t(store.uiLanguage, 'again')}
+                    color={colors.coral}
+                    recommended={suggestedGrade === 'again'}
+                    onPress={() => grade('again')}
+                  />
+                  <Grade
+                    icon="analytics"
+                    label={t(store.uiLanguage, 'hard')}
+                    color={colors.gold}
+                    recommended={suggestedGrade === 'hard'}
+                    onPress={() => grade('hard')}
+                  />
+                  <Grade
+                    icon="checkmark"
+                    label={t(store.uiLanguage, 'good')}
+                    color={colors.mint}
+                    recommended={suggestedGrade === 'good'}
+                    onPress={() => grade('good')}
+                  />
+                  <Grade
+                    icon="flash"
+                    label={t(store.uiLanguage, 'easy')}
+                    color={colors.primary}
+                    recommended={suggestedGrade === 'easy'}
+                    onPress={() => grade('easy')}
+                  />
+                </View>
+              </View>
+            )}
+            <Text style={styles.source}>
+              {verse.translationId.toUpperCase()} · {t(store.uiLanguage, 'source')}
+            </Text>
+          </View>
+        </ScrollView>
+      </ImageBackground>
+    </KeyboardAvoidingView>
+  );
+}
+
+function AdventureShell({ children }: { children: React.ReactNode }) {
+  return (
+    <ImageBackground
+      source={lessonWorld}
+      resizeMode="cover"
+      style={styles.adventureBackground}
+      imageStyle={styles.adventureImage}
+    >
+      <View style={styles.adventureScrim} />
+      <View style={styles.lessonShell}>
+        <View style={styles.lessonPanel}>{children}</View>
+      </View>
+    </ImageBackground>
+  );
+}
+
+function LessonIntro({
+  verse,
+  count,
+  language,
+  kind,
+  resumeIndex,
+  onStart,
+  onClose,
+}: {
+  verse: Verse;
+  count: number;
+  language: UiLanguage;
+  kind: 'lesson' | 'quick';
+  resumeIndex: number;
+  onStart: () => void;
+  onClose: () => void;
+}) {
+  const resumeStage = [
+    t(language, 'stageLearn'),
+    t(language, 'stagePractice'),
+    t(language, 'stageMaster'),
+  ][stageForExercise(resumeIndex)]!;
+  return (
+    <AdventureShell>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Close lesson introduction"
+        onPress={onClose}
+        style={styles.introClose}
+      >
+        <Ionicons name="close" size={25} color="#F8DA78" />
+      </Pressable>
+      <View style={styles.lessonHero}>
+        <View style={[styles.lessonIcon, kind === 'quick' && { backgroundColor: colors.gold }]}>
+          <Ionicons name={kind === 'quick' ? 'flash' : 'star'} size={42} color={colors.white} />
+        </View>
+        <Text style={styles.gameEyebrow}>
+          {(kind === 'quick' ? t(language, 'quickPractice') : t(language, 'lesson')).toUpperCase()}
+        </Text>
+        <Text style={styles.lessonTitle}>{verse.reference}</Text>
+        <Text style={styles.lessonSubtitle}>
+          {kind === 'quick' ? `${t(language, 'reviewFive')} · +25 XP` : t(language, 'lessonIntro')}
+        </Text>
+      </View>
+      <View style={styles.lessonFacts}>
+        <View style={styles.lessonFact}>
+          <Ionicons name="fitness" size={22} color="#F4C95D" />
+          <Text style={styles.lessonFactText}>
+            {count} {t(language, 'lessonSteps').replace(/^\d+\s*/, '')}
+          </Text>
+        </View>
+        <View style={styles.lessonFact}>
+          <Ionicons name="git-branch" size={22} color="#78E2BD" />
+          <Text style={styles.lessonFactText}>
+            {kind === 'quick'
+              ? '+25 XP'
+              : `${resumeStage} · ${stageTotals[stageForExercise(resumeIndex)]} XP`}
+          </Text>
+        </View>
+      </View>
+      {kind === 'lesson' && resumeIndex > 0 && (
+        <View style={styles.resume}>
+          <Text style={styles.resumeText}>
+            {t(language, 'progressSaved')} {resumeStage}
+          </Text>
+          <ProgressBar value={resumeIndex / 10} color={colors.mint} />
+        </View>
+      )}
+      <Button label={t(language, 'startLesson')} onPress={onStart} />
+      <Button label={t(language, 'finish')} variant="secondary" onPress={onClose} />
+    </AdventureShell>
+  );
+}
+
+function StageCheckpoint({
+  language,
+  stageIndex,
+  scores,
+  hearts,
+  onFinish,
+  onContinue,
+}: {
+  language: UiLanguage;
+  stageIndex: number;
+  scores: number[];
+  hearts: number;
+  onFinish: () => void;
+  onContinue: () => void;
+}) {
+  const average = scores.length ? scores.reduce((sum, item) => sum + item, 0) / scores.length : 0;
+  const isFinal = stageIndex === 2;
+  const hasChest = stageIndex > 0;
+  return (
+    <AdventureShell>
+      <View style={styles.checkpointIcon}>
+        <Ionicons name={isFinal ? 'trophy' : 'checkmark'} size={52} color={colors.white} />
+      </View>
+      <Text style={styles.gameEyebrow}>{t(language, 'stageComplete').toUpperCase()}</Text>
+      <Text style={styles.completeTitle}>
+        {
+          [t(language, 'stageLearn'), t(language, 'stagePractice'), t(language, 'stageMaster')][
+            stageIndex
+          ]
+        }
+      </Text>
+      <Text style={styles.xpEarned}>+{stageTotals[stageIndex]} XP</Text>
+      {hasChest && (
+        <View style={styles.chestPreview}>
+          <Image source={chestImageForTier(stageIndex)} style={styles.chestPreviewImage} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.chestPreviewTitle}>
+              {t(language, 'chest')} Lv.{stageIndex}
+            </Text>
+            <Text style={styles.chestPreviewSub}>
+              {isFinal ? t(language, 'chestReady') : t(language, 'chestUpgradeHint')}
+            </Text>
+          </View>
+          <Text style={styles.rewardChip}>❤️ {Math.min(3, hearts + 1)}/3</Text>
+        </View>
+      )}
+      <Text style={styles.completeSub}>
+        {t(language, 'progressSaved')}
+        {'\n'}
+        {t(language, 'continueTomorrow')}
+      </Text>
+      <View style={styles.checkpointProgress}>
+        <View style={styles.strengthTop}>
+          <Text style={styles.strengthLabel}>{t(language, 'lessonAccuracy')}</Text>
+          <Text style={styles.strengthValue}>{Math.round(average * 100)}%</Text>
+        </View>
+        <ProgressBar value={average} color={colors.mint} />
+      </View>
+      <Button
+        label={hasChest ? t(language, 'openChest') : t(language, 'finishForToday')}
+        onPress={onFinish}
+      />
+      {!isFinal && (
+        <Button
+          label={stageIndex === 0 ? t(language, 'continue') : t(language, 'upgradeChest')}
+          variant="secondary"
+          onPress={onContinue}
+        />
+      )}
+    </AdventureShell>
+  );
+}
+
+function ChestRewardScreen({
+  language,
+  baseTier,
+  seed,
+  scores,
+  onReveal,
+  nextVerse,
+  onNext,
+  onClose,
+}: {
+  language: UiLanguage;
+  baseTier: number;
+  seed: string;
+  scores: number[];
+  onReveal: (tier: number) => ChestReward;
+  nextVerse?: Verse;
+  onNext: () => void;
+  onClose: () => void;
+}) {
+  const [taps, setTaps] = useState(0);
+  const [tier, setTier] = useState(baseTier);
+  const [reward, setReward] = useState<ChestReward | null>(null);
+  const [tapMessage, setTapMessage] = useState('');
+  const chestSpin = useRef(new Animated.Value(0)).current;
+  const average = scores.length ? scores.reduce((sum, item) => sum + item, 0) / scores.length : 0;
+  const tapChest = () => {
+    if (reward) return;
+    chestSpin.stopAnimation();
+    chestSpin.setValue(0);
+    Animated.timing(chestSpin, {
+      toValue: 1,
+      duration: 520,
+      easing: Easing.out(Easing.back(1.35)),
+      useNativeDriver: true,
+    }).start();
+    const nextTap = taps + 1;
+    const nextTier = chestTierAfterTap(seed, nextTap, tier, average);
+    setTaps(nextTap);
+    setTier(nextTier);
+    setTapMessage(nextTier > tier ? t(language, 'chestUpgraded') : t(language, 'chestStayed'));
+    if (nextTap === 3) setTimeout(() => setReward(onReveal(nextTier)), 480);
+  };
+  const animatedChestStyle = {
+    transform: [
+      { perspective: 700 },
+      { rotateY: chestSpin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) },
+      { scale: chestSpin.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.12, 1] }) },
+    ],
+  };
+  if (!reward)
+    return (
+      <AdventureShell>
+        <Text style={styles.gameEyebrow}>{t(language, 'rewardEarned').toUpperCase()}</Text>
+        <Text style={styles.completeTitle}>
+          {t(language, 'chest')} Lv.{tier}
+        </Text>
+        <Text style={styles.completeSub}>{t(language, 'surpriseReward')}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t(language, 'tapToOpen')}
+          onPress={tapChest}
+          style={({ pressed }) => [styles.closedChest, pressed && styles.closedChestPressed]}
+        >
+          <View style={styles.chestGlow} />
+          <Animated.Image
+            source={chestImageForTier(tier)}
+            style={[styles.closedChestImage, animatedChestStyle]}
+          />
+          <View style={styles.chestQuestion}>
+            <Text style={styles.chestQuestionText}>{3 - taps}</Text>
+          </View>
+        </Pressable>
+        <View style={styles.tapDots}>
+          {[1, 2, 3].map((item) => (
+            <View key={item} style={[styles.tapDot, item <= taps && styles.tapDotDone]} />
+          ))}
+        </View>
+        <Text
+          style={[
+            styles.tapChest,
+            tapMessage === t(language, 'chestUpgraded') && { color: colors.mint },
+          ]}
+        >
+          {taps ? tapMessage : `${t(language, 'tapToOpen')} · 3×`}
+        </Text>
+        <View style={styles.checkpointProgress}>
+          <View style={styles.strengthTop}>
+            <Text style={styles.strengthLabel}>{t(language, 'lessonAccuracy')}</Text>
+            <Text style={styles.strengthValue}>{Math.round(average * 100)}%</Text>
+          </View>
+          <ProgressBar value={average} color={colors.mint} />
+        </View>
+      </AdventureShell>
+    );
+  return (
+    <AdventureShell>
+      <View style={styles.openChest}>
+        <View style={styles.openChestGlow} />
+        <Image source={chestImageForTier(reward.tier)} style={styles.openChestImage} />
+        <Text style={styles.openChestSparkle}>✨</Text>
+      </View>
+      <Text style={styles.gameEyebrow}>{t(language, 'rewardEarned').toUpperCase()}</Text>
+      <Text style={styles.completeTitle}>
+        {t(language, 'chest')} Lv.{reward.tier}
+      </Text>
+      <View style={styles.rewardList}>
+        {reward.rewards.map((loot, index) => (
+          <View key={`${loot.type}-${index}`} style={styles.lootReward}>
+            <Text style={styles.lootRewardText}>{lootLabel(loot, language)}</Text>
+            {index > 0 && <Text style={styles.bonusBadge}>BONUS</Text>}
+          </View>
+        ))}
+      </View>
+      <Button
+        label={
+          nextVerse
+            ? `${t(language, 'nextVerse')} · ${nextVerse.reference}`
+            : t(language, 'backHome')
+        }
+        onPress={onNext}
+      />
+      {nextVerse && (
+        <Button label={t(language, 'backHome')} variant="secondary" onPress={onClose} />
+      )}
+    </AdventureShell>
+  );
+}
+
+function lootLabel(loot: ChestLoot, language: UiLanguage): string {
+  if (loot.type === 'gold') return `🪙 +${loot.amount} ${t(language, 'gold')}`;
+  if (loot.type === 'wildShards') return `🃏 +${loot.amount} Wild Shards`;
+  if (loot.type === 'streakFreeze') return `🛡️ +${loot.amount} Streak Freeze`;
+  if (loot.type === 'xpBooster' || loot.type === 'goldBooster')
+    return `${loot.type === 'xpBooster' ? '⚡' : '🪙'} 2× ${loot.type === 'xpBooster' ? 'XP' : 'Gold'} · ${loot.durationMinutes} min`;
+  if (loot.type === 'characterShards')
+    return loot.characters
+      .map((item) => `🧩 ${characterById(item.characterId).names[language]} +${item.amount}`)
+      .join('  ·  ');
+  return '';
+}
+
+function Choice({
+  label,
+  selected,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={[styles.choice, selected && styles.choiceSelected, disabled && styles.choiceDisabled]}
+    >
+      <Text style={[styles.choiceText, selected && styles.choiceTextSelected]}>{label}</Text>
+    </Pressable>
+  );
+}
+function Strength({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <View style={styles.strength}>
+      <View style={styles.strengthTop}>
+        <Text style={styles.strengthLabel}>{label}</Text>
+        <Text style={[styles.strengthValue, { color }]}>{Math.round(value * 100)}%</Text>
+      </View>
+      <ProgressBar value={value} color={color} />
+    </View>
+  );
+}
+function Grade({
+  icon,
+  label,
+  color,
+  recommended,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  color: string;
+  recommended?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={recommended ? 'Recommended assessment' : undefined}
+      onPress={onPress}
+      style={[styles.grade, recommended && { borderColor: color, backgroundColor: `${color}12` }]}
+    >
+      <View style={[styles.gradeIcon, { backgroundColor: `${color}20` }]}>
+        <Ionicons name={icon} size={20} color={color} />
+      </View>
+      <Text style={styles.gradeLabel}>{label}</Text>
+      {recommended && <Text style={[styles.recommendedMark, { color }]}>{'●'}</Text>}
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#10132D' },
+  adventureBackground: { flex: 1 },
+  adventureImage: { opacity: 0.9 },
+  adventureScrim: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(19,12,38,.42)',
+  },
+  header: {
+    height: 68,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(25,16,48,.97)',
+    borderBottomWidth: 2,
+    borderBottomColor: '#E6B956',
+  },
+  iconButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
+  stopButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8 },
+  stopText: { fontSize: 11, fontWeight: '900', color: '#F8DA78' },
+  hearts: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  heartsText: { fontSize: 11, fontWeight: '900', color: '#FFF' },
+  headerProgress: { flex: 1 },
+  sequenceCount: { fontSize: 12, fontWeight: '900', color: '#F8DA78' },
+  page: { padding: 18, maxWidth: 720, width: '100%', alignSelf: 'center' },
+  practiceCard: {
+    gap: 17,
+    padding: 18,
+    backgroundColor: 'rgba(62,31,108,.97)',
+    borderWidth: 2,
+    borderBottomWidth: 5,
+    borderColor: '#E6B956',
+    borderRadius: 26,
+  },
+  adaptive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F2C85E',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: radius.sm,
+  },
+  adaptiveText: { fontSize: 12, color: '#2A1455', fontWeight: '900', flex: 1 },
+  adaptiveStrong: { fontWeight: '900', color: '#2A1455' },
+  combo: { fontSize: 11, fontWeight: '900', color: '#2A1455' },
+  modeRow: { gap: 7, paddingVertical: 2 },
+  mode: {
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.pill,
+    paddingHorizontal: 13,
+    backgroundColor: '#FFF9E8',
+    borderWidth: 1,
+    borderColor: '#E6B956',
+  },
+  modeActive: { backgroundColor: '#F2C85E', borderColor: '#F2C85E' },
+  modeText: { fontSize: 11, fontWeight: '700', color: '#4A356A' },
+  modeTextActive: { color: '#2A1455' },
+  referenceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  referenceEyebrow: { fontSize: 11, fontWeight: '900', letterSpacing: 1.1, color: '#F8DA78' },
+  stage: {
+    fontSize: 12,
+    color: '#FFF',
+    fontWeight: '800',
+    backgroundColor: '#7040C7',
+    borderWidth: 1,
+    borderColor: '#A87BEB',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    textTransform: 'capitalize',
+  },
+  masteryRow: { flexDirection: 'row', gap: 12 },
+  strength: { flex: 1, gap: 6 },
+  strengthTop: { flexDirection: 'row', justifyContent: 'space-between' },
+  strengthLabel: { fontSize: 11, fontWeight: '800', color: '#D8CFEB' },
+  strengthValue: { fontSize: 12, fontWeight: '900' },
+  prompt: {
+    fontSize: 25,
+    lineHeight: 38,
+    fontWeight: '800',
+    color: '#FFF',
+    textAlign: 'center',
+    paddingVertical: 10,
+    textShadowColor: '#241039',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 2,
+  },
+  chinese: { lineHeight: 44, letterSpacing: 1 },
+  input: {
+    minHeight: 130,
+    backgroundColor: '#FFF9E8',
+    borderWidth: 2,
+    borderColor: '#E6B956',
+    borderRadius: radius.md,
+    padding: 17,
+    fontSize: 18,
+    lineHeight: 29,
+    color: colors.ink,
+    textAlignVertical: 'top',
+  },
+  hint: {
+    flexDirection: 'row',
+    gap: 10,
+    backgroundColor: '#FFF5D9',
+    padding: 14,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: '#E6B956',
+  },
+  hintText: { flex: 1, color: colors.inkSoft, lineHeight: 20 },
+  actions: { gap: 10, marginTop: 4 },
+  choices: { gap: 9 },
+  twoChoices: { flexDirection: 'row', gap: 10 },
+  wordChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, justifyContent: 'center' },
+  matchGrid: { flexDirection: 'row', gap: 10, alignItems: 'stretch' },
+  matchColumn: { flex: 1, gap: 9 },
+  choice: {
+    padding: 14,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.white,
+  },
+  choiceSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  choiceDisabled: { opacity: 0.55 },
+  choiceText: { fontWeight: '700', color: colors.inkSoft, textAlign: 'center' },
+  choiceTextSelected: { color: colors.primary },
+  tokens: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
+  token: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  tokenUsed: { opacity: 0.3 },
+  tokenText: { color: colors.ink, fontWeight: '700' },
+  answerBuilder: {
+    minHeight: 70,
+    padding: 14,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    justifyContent: 'center',
+  },
+  answerBuilderText: { fontSize: 17, lineHeight: 27, color: colors.ink },
+  selectedTokens: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  selectedToken: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  selectedTokenText: { fontSize: 16, color: colors.ink, fontWeight: '800' },
+  answerPanel: {
+    gap: 17,
+    backgroundColor: '#FFF9E8',
+    borderRadius: radius.lg,
+    padding: 18,
+    borderWidth: 2,
+    borderColor: '#E6B956',
+  },
+  scoreRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  answerTitle: { fontWeight: '800', color: colors.muted, textTransform: 'uppercase', fontSize: 12 },
+  score: { fontWeight: '900', fontSize: 24 },
+  acceptance: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderWidth: 1.5,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#FFFFFFB8',
+  },
+  acceptanceText: { flex: 1, fontSize: 13, fontWeight: '800', color: colors.inkSoft },
+  answerText: { fontSize: 16, lineHeight: 26, color: colors.inkSoft },
+  gradeHint: { fontSize: 11, fontWeight: '800', color: colors.muted, textAlign: 'center' },
+  grades: { flexDirection: 'row', justifyContent: 'space-between', gap: 5 },
+  grade: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 5,
+    minHeight: 78,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    borderRadius: radius.md,
+    paddingVertical: 6,
+  },
+  gradeIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gradeLabel: { fontSize: 11, fontWeight: '800', color: colors.ink },
+  recommendedMark: { fontSize: 9, lineHeight: 9 },
+  source: { textAlign: 'center', fontSize: 11, color: '#D8CFEB', marginBottom: 4 },
+  lessonShell: {
+    flex: 1,
+    padding: 20,
+    maxWidth: 620,
+    width: '100%',
+    alignSelf: 'center',
+    justifyContent: 'center',
+  },
+  lessonPanel: {
+    position: 'relative',
+    padding: 24,
+    gap: 17,
+    backgroundColor: 'rgba(62,31,108,.97)',
+    borderWidth: 2,
+    borderBottomWidth: 6,
+    borderColor: '#E6B956',
+    borderRadius: 28,
+  },
+  introClose: {
+    position: 'absolute',
+    zIndex: 2,
+    top: 8,
+    right: 8,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(25,16,48,.72)',
+    borderRadius: 22,
+  },
+  lessonHero: { alignItems: 'center', gap: 9 },
+  gameEyebrow: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.3,
+    color: '#F8DA78',
+    textAlign: 'center',
+  },
+  lessonIcon: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: '#7040C7',
+    borderWidth: 3,
+    borderColor: '#F2C85E',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 7,
+  },
+  lessonTitle: {
+    fontSize: 34,
+    fontWeight: '900',
+    color: '#FFF',
+    textAlign: 'center',
+    textShadowColor: '#241039',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 2,
+  },
+  lessonSubtitle: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#D8CFEB',
+    textAlign: 'center',
+    maxWidth: 420,
+  },
+  lessonFacts: { flexDirection: 'row', gap: 12 },
+  lessonFact: {
+    flex: 1,
+    minHeight: 74,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(28,17,52,.82)',
+    borderWidth: 1.5,
+    borderColor: '#8C65C2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  lessonFactText: { fontSize: 12, fontWeight: '800', color: '#FFF', textAlign: 'center' },
+  resume: {
+    gap: 9,
+    backgroundColor: 'rgba(52,127,105,.42)',
+    borderWidth: 1,
+    borderColor: '#78E2BD',
+    padding: 14,
+    borderRadius: radius.md,
+  },
+  resumeText: { fontSize: 12, fontWeight: '800', color: '#FFF', textAlign: 'center' },
+  checkpointIcon: {
+    width: 102,
+    height: 102,
+    borderRadius: 51,
+    backgroundColor: colors.mint,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 4,
+    borderColor: '#D4FFE9',
+  },
+  checkpointProgress: {
+    gap: 8,
+    backgroundColor: '#FFF9E8',
+    padding: 16,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: '#E6B956',
+  },
+  rewardChip: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: colors.inkSoft,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+  },
+  chestPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#FFF7DE',
+    borderWidth: 2,
+    borderColor: '#E6B956',
+    borderRadius: radius.md,
+    padding: 14,
+  },
+  chestPreviewImage: { width: 62, height: 58, resizeMode: 'contain' },
+  chestPreviewTitle: { fontSize: 16, fontWeight: '900', color: colors.ink },
+  chestPreviewSub: { fontSize: 11, color: colors.muted, marginTop: 3 },
+  xpEarned: { fontSize: 31, fontWeight: '900', color: '#F8DA78', textAlign: 'center' },
+  completeTitle: {
+    fontSize: 34,
+    fontWeight: '900',
+    color: '#FFF',
+    textAlign: 'center',
+    textShadowColor: '#241039',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 2,
+  },
+  completeSub: { fontSize: 14, lineHeight: 21, color: '#D8CFEB', textAlign: 'center' },
+  closedChest: {
+    width: 220,
+    height: 200,
+    borderRadius: 70,
+    backgroundColor: 'rgba(24,15,45,.7)',
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 4,
+    borderColor: '#F0C95B',
+  },
+  closedChestPressed: { transform: [{ scale: 0.94 }] },
+  chestGlow: {
+    position: 'absolute',
+    width: 170,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(255,225,115,.35)',
+  },
+  closedChestImage: { width: 205, height: 178, resizeMode: 'contain' },
+  chestQuestion: {
+    position: 'absolute',
+    right: 14,
+    top: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#7040C7',
+    borderWidth: 2,
+    borderColor: '#F2C85E',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chestQuestionText: { color: colors.white, fontSize: 22, fontWeight: '900' },
+  tapChest: { fontSize: 15, fontWeight: '900', color: '#F8DA78', textAlign: 'center' },
+  openChest: {
+    width: 180,
+    height: 145,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  openChestGlow: {
+    position: 'absolute',
+    width: 132,
+    height: 132,
+    borderRadius: 66,
+    backgroundColor: 'rgba(255,225,115,.38)',
+  },
+  openChestImage: { width: 172, height: 138, resizeMode: 'contain' },
+  openChestSparkle: { position: 'absolute', right: 5, top: 0, fontSize: 35 },
+  rewardList: { gap: 9 },
+  lootReward: {
+    minHeight: 54,
+    backgroundColor: '#FFF9E8',
+    borderWidth: 2,
+    borderColor: '#E6B956',
+    borderRadius: radius.md,
+    padding: 12,
+    justifyContent: 'center',
+  },
+  lootRewardText: { fontSize: 15, fontWeight: '900', color: colors.ink, textAlign: 'center' },
+  bonusBadge: {
+    position: 'absolute',
+    right: 7,
+    top: 5,
+    fontSize: 8,
+    fontWeight: '900',
+    color: colors.primary,
+  },
+  tapDots: { flexDirection: 'row', alignSelf: 'center', gap: 8 },
+  tapDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.line },
+  tapDotDone: { backgroundColor: colors.primary },
+});

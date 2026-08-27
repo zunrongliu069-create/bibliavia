@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Scriptora",
+    "slug": "scriptora-scripture",
+    "scheme": "scriptora",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.scriptora.scripture"
+    },
+    "android": {
+      "package": "app.scriptora.scripture",
+      "adaptiveIcon": {
+        "backgroundColor": "#15142B"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "name": "Scriptora"
+    },
+    "plugins": ["expo-localization", "expo-web-browser"],
+    "locales": {
+      "en": "./locales/en.json",
+      "sv": "./locales/sv.json",
+      "zh-Hans": "./locales/zh-Hans.json",
+      "zh-Hant": "./locales/zh-Hant.json"
+    }
+  }
+}

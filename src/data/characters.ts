@@ -1,0 +1,431 @@
+import type { ImageSourcePropType } from 'react-native';
+import type { BiblePeriodId, CharacterId, CharacterRarity, UiLanguage } from '../types';
+import { characterPeriods } from './periods';
+
+export interface BibleCharacter {
+  id: CharacterId;
+  rarity: CharacterRarity;
+  period: BiblePeriodId;
+  unlockCost: number;
+  names: Record<UiLanguage, string>;
+  description: Record<UiLanguage, string>;
+  books: string[];
+  references: string[];
+  image?: ImageSourcePropType;
+}
+
+const costs: Record<CharacterRarity, number> = { common: 40, rare: 60, epic: 80, legendary: 100 };
+const make = (
+  id: CharacterId,
+  rarity: CharacterRarity,
+  names: Record<UiLanguage, string>,
+  description: Record<UiLanguage, string>,
+  books: string[],
+  references: string[],
+  image: ImageSourcePropType,
+): BibleCharacter => ({
+  id,
+  rarity,
+  period: characterPeriods[id]!,
+  unlockCost: costs[rarity],
+  names,
+  description,
+  books,
+  references,
+  image,
+});
+const names = (
+  en: string,
+  sv: string,
+  zhHans: string,
+  zhHant: string,
+): Record<UiLanguage, string> => ({ en, sv, 'zh-Hans': zhHans, 'zh-Hant': zhHant });
+const descriptions = (
+  en: string,
+  sv: string,
+  zhHans: string,
+  zhHant: string,
+): Record<UiLanguage, string> => ({ en, sv, 'zh-Hans': zhHans, 'zh-Hant': zhHant });
+
+const coreCharacters: BibleCharacter[] = [
+  make(
+    'david',
+    'legendary',
+    names('David', 'David', '大卫', '大衛'),
+    descriptions(
+      'Shepherd, king, psalmist, and a man who learned both courage and repentance.',
+      'Herde, kung och psalmist som lärde sig både mod och omvändelse.',
+      '牧人、君王和诗篇作者，也经历勇气与悔改。',
+      '牧人、君王和詩篇作者，也經歷勇氣與悔改。',
+    ),
+    ['1 Samuel', '2 Samuel', 'Psalms'],
+    ['1 Samuel 17', 'Psalm 23'],
+    require('../../assets/characters/david.png'),
+  ),
+  make(
+    'moses',
+    'legendary',
+    names('Moses', 'Mose', '摩西', '摩西'),
+    descriptions(
+      'Prophet and leader who led Israel from slavery toward the promised land.',
+      'Profet och ledare som förde Israel från slaveriet mot det utlovade landet.',
+      '带领以色列人离开奴役、走向应许之地的先知和领袖。',
+      '帶領以色列人離開奴役、走向應許之地的先知和領袖。',
+    ),
+    ['Exodus', 'Deuteronomy'],
+    ['Exodus 3', 'Exodus 20'],
+    require('../../assets/characters/moses.png'),
+  ),
+  make(
+    'abraham',
+    'legendary',
+    names('Abraham', 'Abraham', '亚伯拉罕', '亞伯拉罕'),
+    descriptions(
+      'A patriarch called to trust God and journey toward an unknown land.',
+      'En patriark kallad att lita på Gud och resa mot ett okänt land.',
+      '蒙召信靠神、前往未知之地的族长。',
+      '蒙召信靠神、前往未知之地的族長。',
+    ),
+    ['Genesis'],
+    ['Genesis 12', 'Genesis 22'],
+    require('../../assets/characters/abraham.png'),
+  ),
+  make(
+    'paul',
+    'legendary',
+    names('Paul', 'Paulus', '保罗', '保羅'),
+    descriptions(
+      'Apostle, missionary, and letter writer whose life was transformed.',
+      'Apostel, missionär och brevskrivare vars liv förvandlades.',
+      '生命被改变的使徒、宣教士和书信作者。',
+      '生命被改變的使徒、宣教士和書信作者。',
+    ),
+    ['Acts', 'Romans'],
+    ['Acts 9', 'Romans 8'],
+    require('../../assets/characters/paul.png'),
+  ),
+  make(
+    'peter',
+    'epic',
+    names('Peter', 'Petrus', '彼得', '彼得'),
+    descriptions(
+      'Fisherman and apostle who grew from impulsive disciple into courageous witness.',
+      'Fiskare och apostel som växte från impulsiv lärjunge till modigt vittne.',
+      '从冲动的门徒成长为勇敢见证人的渔夫和使徒。',
+      '從衝動的門徒成長為勇敢見證人的漁夫和使徒。',
+    ),
+    ['Gospels', 'Acts'],
+    ['Matthew 14', 'Acts 2'],
+    require('../../assets/characters/peter.png'),
+  ),
+  make(
+    'esther',
+    'epic',
+    names('Esther', 'Ester', '以斯帖', '以斯帖'),
+    descriptions(
+      'Queen who used courage and wisdom to protect her people.',
+      'Drottning som använde mod och vishet för att skydda sitt folk.',
+      '以勇气和智慧保护同胞的王后。',
+      '以勇氣和智慧保護同胞的王后。',
+    ),
+    ['Esther'],
+    ['Esther 4', 'Esther 7'],
+    require('../../assets/characters/esther.png'),
+  ),
+  make(
+    'daniel',
+    'epic',
+    names('Daniel', 'Daniel', '但以理', '但以理'),
+    descriptions(
+      'Exile and wise servant who remained faithful under pressure.',
+      'Landsflyktig och vis tjänare som förblev trofast under press.',
+      '在压力中仍保持忠心的被掳者和智慧官员。',
+      '在壓力中仍保持忠心的被擄者和智慧官員。',
+    ),
+    ['Daniel'],
+    ['Daniel 1', 'Daniel 6'],
+    require('../../assets/characters/daniel.png'),
+  ),
+  make(
+    'mary',
+    'epic',
+    names('Mary', 'Maria', '马利亚', '馬利亞'),
+    descriptions(
+      'Young Jewish woman who received a costly calling with courage and trust.',
+      'Ung judisk kvinna som tog emot en krävande kallelse med mod och tillit.',
+      '以勇气和信靠接受重大呼召的年轻犹太女子。',
+      '以勇氣和信靠接受重大呼召的年輕猶太女子。',
+    ),
+    ['Luke', 'John'],
+    ['Luke 1', 'John 2'],
+    require('../../assets/characters/mary.png'),
+  ),
+  make(
+    'joseph',
+    'epic',
+    names('Joseph', 'Josef', '约瑟', '約瑟'),
+    descriptions(
+      'Dreamer, servant, and administrator whose suffering became a path to rescue.',
+      'Drömmare, tjänare och förvaltare vars lidande blev en väg till räddning.',
+      '从做梦者、仆人到治理者，苦难最终成为拯救之路。',
+      '從做夢者、僕人到治理者，苦難最終成為拯救之路。',
+    ),
+    ['Genesis'],
+    ['Genesis 37', 'Genesis 50'],
+    require('../../assets/characters/joseph.png'),
+  ),
+  make(
+    'ruth',
+    'rare',
+    names('Ruth', 'Rut', '路得', '路得'),
+    descriptions(
+      'A loyal outsider whose faithful choices became part of a larger story.',
+      'En trofast främling vars val blev del av en större berättelse.',
+      '忠诚的外族女子，她的选择进入了更大的故事。',
+      '忠誠的外族女子，她的選擇進入了更大的故事。',
+    ),
+    ['Ruth'],
+    ['Ruth 1', 'Ruth 2'],
+    require('../../assets/characters/ruth.png'),
+  ),
+  make(
+    'elijah',
+    'rare',
+    names('Elijah', 'Elia', '以利亚', '以利亞'),
+    descriptions(
+      'Prophet who confronted idolatry and also learned to hear the quiet voice.',
+      'Profet som konfronterade avgudadyrkan och lärde sig höra den stilla rösten.',
+      '对抗偶像崇拜，也学习聆听微小声音的先知。',
+      '對抗偶像崇拜，也學習聆聽微小聲音的先知。',
+    ),
+    ['1 Kings', '2 Kings'],
+    ['1 Kings 18', '1 Kings 19'],
+    require('../../assets/characters/elijah.png'),
+  ),
+  make(
+    'deborah',
+    'rare',
+    names('Deborah', 'Debora', '底波拉', '底波拉'),
+    descriptions(
+      'Judge and prophet who led with wisdom, clarity, and courage.',
+      'Domare och profet som ledde med vishet, tydlighet och mod.',
+      '以智慧、清晰和勇气带领百姓的士师和先知。',
+      '以智慧、清晰和勇氣帶領百姓的士師和先知。',
+    ),
+    ['Judges'],
+    ['Judges 4', 'Judges 5'],
+    require('../../assets/characters/deborah.png'),
+  ),
+  make(
+    'joshua',
+    'rare',
+    names('Joshua', 'Josua', '约书亚', '約書亞'),
+    descriptions(
+      'Leader charged with courage, obedience, and the care of a new generation.',
+      'Ledare kallad till mod, lydnad och omsorg om en ny generation.',
+      '受托以勇气和顺服带领新一代的领袖。',
+      '受託以勇氣和順服帶領新一代的領袖。',
+    ),
+    ['Exodus', 'Joshua'],
+    ['Joshua 1', 'Joshua 24'],
+    require('../../assets/characters/joshua.png'),
+  ),
+  make(
+    'john-baptist',
+    'rare',
+    names('John the Baptist', 'Johannes döparen', '施洗约翰', '施洗約翰'),
+    descriptions(
+      'Wilderness preacher who prepared people to receive the Messiah.',
+      'Ökenpredikant som förberedde människor att ta emot Messias.',
+      '在旷野传道、预备人迎接弥赛亚的人。',
+      '在曠野傳道、預備人迎接彌賽亞的人。',
+    ),
+    ['Matthew', 'Luke', 'John'],
+    ['Matthew 3', 'John 1'],
+    require('../../assets/characters/john-baptist.png'),
+  ),
+  make(
+    'samuel',
+    'common',
+    names('Samuel', 'Samuel', '撒母耳', '撒母耳'),
+    descriptions(
+      'Prophet and judge who learned to listen and served through a changing era.',
+      'Profet och domare som lärde sig lyssna och tjänade genom en tid av förändring.',
+      '学习聆听，并在时代转变中服事的先知和士师。',
+      '學習聆聽，並在時代轉變中服事的先知和士師。',
+    ),
+    ['1 Samuel'],
+    ['1 Samuel 3', '1 Samuel 16'],
+    require('../../assets/characters/samuel.png'),
+  ),
+  make(
+    'nehemiah',
+    'common',
+    names('Nehemiah', 'Nehemja', '尼希米', '尼希米'),
+    descriptions(
+      'Governor who combined prayer, planning, and practical rebuilding.',
+      'Ståthållare som förenade bön, planering och praktiskt återuppbyggande.',
+      '把祷告、规划和实际重建结合起来的省长。',
+      '把禱告、規劃和實際重建結合起來的省長。',
+    ),
+    ['Nehemiah'],
+    ['Nehemiah 2', 'Nehemiah 4'],
+    require('../../assets/characters/nehemiah.png'),
+  ),
+  make(
+    'gideon',
+    'common',
+    names('Gideon', 'Gideon', '基甸', '基甸'),
+    descriptions(
+      'Reluctant farmer who learned courage while facing fear and uncertainty.',
+      'Tveksam lantbrukare som lärde sig mod mitt i rädsla och osäkerhet.',
+      '在恐惧和不确定中学习勇气的农夫。',
+      '在恐懼和不確定中學習勇氣的農夫。',
+    ),
+    ['Judges'],
+    ['Judges 6', 'Judges 7'],
+    require('../../assets/characters/gideon.png'),
+  ),
+  make(
+    'hannah',
+    'common',
+    names('Hannah', 'Hanna', '哈拿', '哈拿'),
+    descriptions(
+      'Woman remembered for honest prayer, perseverance, and gratitude.',
+      'Kvinna ihågkommen för ärlig bön, uthållighet och tacksamhet.',
+      '因真诚祷告、坚持和感恩而被记念的女子。',
+      '因真誠禱告、堅持和感恩而被記念的女子。',
+    ),
+    ['1 Samuel'],
+    ['1 Samuel 1', '1 Samuel 2'],
+    require('../../assets/characters/hannah.png'),
+  ),
+  make(
+    'timothy',
+    'common',
+    names('Timothy', 'Timotheos', '提摩太', '提摩太'),
+    descriptions(
+      'Young teacher encouraged to grow in courage, character, and faithful service.',
+      'Ung lärare som uppmuntrades att växa i mod, karaktär och trogen tjänst.',
+      '受鼓励在勇气、品格和忠心服事上成长的年轻教师。',
+      '受鼓勵在勇氣、品格和忠心服事上成長的年輕教師。',
+    ),
+    ['Acts', '1 Timothy', '2 Timothy'],
+    ['1 Timothy 4', '2 Timothy 1'],
+    require('../../assets/characters/timothy.png'),
+  ),
+  make(
+    'lydia',
+    'common',
+    names('Lydia', 'Lydia', '吕底亚', '呂底亞'),
+    descriptions(
+      'Merchant whose hospitality helped a new community take root in Philippi.',
+      'Handlare vars gästfrihet hjälpte en ny gemenskap att slå rot i Filippi.',
+      '以好客帮助腓立比新群体扎根的商人。',
+      '以好客幫助腓立比新群體扎根的商人。',
+    ),
+    ['Acts'],
+    ['Acts 16'],
+    require('../../assets/characters/lydia.png'),
+  ),
+];
+
+const periodBooks: Record<BiblePeriodId, string[]> = {
+  1: ['Genesis 1–11'],
+  2: ['Genesis 12–50'],
+  3: ['Exodus', 'Leviticus', 'Numbers', 'Deuteronomy'],
+  4: ['Joshua', 'Judges'],
+  5: ['Ruth', '1 Samuel', '2 Samuel'],
+  6: ['1 Kings', '2 Kings'],
+  7: ['Chronicles', 'Ezra', 'Nehemiah', 'Esther', 'Daniel'],
+  8: ['Isaiah–Malachi'],
+  9: ['Matthew', 'Mark', 'Luke', 'John'],
+  10: ['Acts–Revelation'],
+};
+
+const additionalCharacterData: Array<[CharacterId, string, BiblePeriodId, CharacterRarity]> = [
+  ['adam', 'Adam', 1, 'legendary'],
+  ['eve', 'Eve', 1, 'legendary'],
+  ['cain', 'Cain', 1, 'common'],
+  ['abel', 'Abel', 1, 'rare'],
+  ['noah', 'Noah', 1, 'legendary'],
+  ['shem', 'Shem', 1, 'rare'],
+  ['ham', 'Ham', 1, 'common'],
+  ['japheth', 'Japheth', 1, 'common'],
+  ['nimrod', 'Nimrod', 1, 'rare'],
+  ['sarah', 'Sarah', 2, 'legendary'],
+  ['lot', 'Lot', 2, 'rare'],
+  ['hagar', 'Hagar', 2, 'epic'],
+  ['ishmael', 'Ishmael', 2, 'rare'],
+  ['isaac', 'Isaac', 2, 'legendary'],
+  ['rebekah', 'Rebekah', 2, 'epic'],
+  ['esau', 'Esau', 2, 'rare'],
+  ['jacob', 'Jacob', 2, 'legendary'],
+  ['rachel', 'Rachel', 2, 'epic'],
+  ['leah', 'Leah', 2, 'epic'],
+  ['judah', 'Judah', 2, 'epic'],
+  ['benjamin', 'Benjamin', 2, 'rare'],
+  ['aaron', 'Aaron', 3, 'epic'],
+  ['miriam', 'Miriam', 3, 'epic'],
+  ['caleb', 'Caleb', 3, 'rare'],
+  ['jethro', 'Jethro', 3, 'rare'],
+  ['balaam', 'Balaam', 3, 'rare'],
+  ['rahab', 'Rahab', 4, 'epic'],
+  ['samson', 'Samson', 4, 'legendary'],
+  ['saul', 'Saul', 5, 'legendary'],
+  ['jonathan', 'Jonathan', 5, 'epic'],
+  ['solomon', 'Solomon', 6, 'legendary'],
+  ['ahab', 'Ahab', 6, 'epic'],
+  ['elisha', 'Elisha', 6, 'legendary'],
+  ['hezekiah', 'Hezekiah', 6, 'epic'],
+  ['josiah', 'Josiah', 6, 'epic'],
+  ['ezra', 'Ezra', 7, 'epic'],
+  ['zerubbabel', 'Zerubbabel', 7, 'rare'],
+  ['isaiah', 'Isaiah', 8, 'legendary'],
+  ['jeremiah', 'Jeremiah', 8, 'legendary'],
+  ['ezekiel', 'Ezekiel', 8, 'legendary'],
+  ['hosea', 'Hosea', 8, 'epic'],
+  ['amos', 'Amos', 8, 'rare'],
+  ['jonah', 'Jonah', 8, 'epic'],
+  ['micah', 'Micah', 8, 'rare'],
+  ['jesus', 'Jesus', 9, 'legendary'],
+  ['joseph-nazareth', 'Joseph', 9, 'epic'],
+  ['mary-magdalene', 'Mary Magdalene', 9, 'epic'],
+  ['martha', 'Martha', 9, 'rare'],
+  ['lazarus', 'Lazarus', 9, 'epic'],
+  ['nicodemus', 'Nicodemus', 9, 'rare'],
+  ['stephen', 'Stephen', 10, 'epic'],
+  ['barnabas', 'Barnabas', 10, 'epic'],
+  ['james', 'James', 10, 'legendary'],
+  ['john', 'John', 10, 'legendary'],
+  ['priscilla', 'Priscilla', 10, 'epic'],
+];
+
+const additionalCharacters = additionalCharacterData.map(
+  ([id, label, period, rarity]): BibleCharacter => ({
+    id,
+    rarity,
+    period,
+    unlockCost: costs[rarity],
+    names: names(label, label, label, label),
+    description: descriptions(
+      `A significant person in ${periodBooks[period][0]}.`,
+      `En betydelsefull person i ${periodBooks[period][0]}.`,
+      `这一时期的重要人物。`,
+      `這一時期的重要人物。`,
+    ),
+    books: periodBooks[period],
+    references: periodBooks[period],
+  }),
+);
+
+export const characters: BibleCharacter[] = [...coreCharacters, ...additionalCharacters];
+
+export const characterById = (id: CharacterId) =>
+  characters.find((character) => character.id === id) ?? characters[0]!;
+export const rarityColors: Record<CharacterRarity, string> = {
+  common: '#8C9AA4',
+  rare: '#3B82C4',
+  epic: '#8B5CC7',
+  legendary: '#D69B2D',
+};
