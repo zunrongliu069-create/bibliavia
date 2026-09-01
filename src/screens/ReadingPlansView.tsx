@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, Eyebrow, ProgressBar } from '../components/ui';
 import { readingPlanById, readingPlans } from '../data/readingPlans';
 import { t } from '../lib/i18n';
+import { uiText } from '../lib/uiText';
 import { colors, radius } from '../theme';
 import { useAppStore } from '../store/AppStore';
 
@@ -15,6 +16,7 @@ export function ReadingPlansView({
   compact?: boolean;
 }) {
   const store = useAppStore();
+  const u = (text: string) => uiText(store.uiLanguage, text);
   const activeId = store.progress.activeReadingPlanId;
   const activePlan = activeId ? readingPlanById(activeId) : undefined;
   const activeProgress = activeId ? store.progress.readingPlanProgress[activeId] : undefined;
@@ -41,6 +43,7 @@ export function ReadingPlansView({
                 {activeProgress.completedDays.length}/{activePlan.durationDays}{' '}
                 {t(store.uiLanguage, 'days')}
               </Text>
+              <Text style={styles.goalReward}>{u('DAILY GOAL · +10 XP minimum')}</Text>
             </View>
             {activeProgress.paused && (
               <Text style={styles.paused}>{t(store.uiLanguage, 'paused')}</Text>
@@ -90,7 +93,7 @@ export function ReadingPlansView({
               {selected.references[store.uiLanguage].map((reference, index) => (
                 <Pressable
                   key={`${reference}-${index}`}
-                  accessibilityRole="link"
+                  accessibilityRole="button"
                   accessibilityLabel={`${t(store.uiLanguage, 'openPassage')} ${reference}`}
                   onPress={() =>
                     onOpenReference(selected.references.en[index] ?? reference, reference)
@@ -153,7 +156,8 @@ export function ReadingPlansView({
                     <View style={{ flex: 1 }}>
                       <Text style={styles.planTitle}>{plan.title[store.uiLanguage]}</Text>
                       <Text style={styles.planDuration}>
-                        {plan.durationDays} {t(store.uiLanguage, 'days')}
+                        {u(plan.category.replace('-', ' ')).toUpperCase()} · {plan.durationDays}{' '}
+                        {t(store.uiLanguage, 'days')}
                       </Text>
                     </View>
                     {progress && (
@@ -163,6 +167,9 @@ export function ReadingPlansView({
                     )}
                   </View>
                   <Text style={styles.planDescription}>{plan.description[store.uiLanguage]}</Text>
+                  <Text style={styles.catalogReward}>
+                    🎁 {u('Daily XP · 100 Gold completion reward')}
+                  </Text>
                   {progress && <ProgressBar value={done / plan.durationDays} color={plan.color} />}
                   <Button
                     label={
@@ -203,6 +210,13 @@ const styles = StyleSheet.create({
   planIconText: { fontSize: 29 },
   activeTitle: { fontSize: 20, fontWeight: '900', color: colors.ink, marginTop: 3 },
   activeSub: { fontSize: 12, color: colors.muted, marginTop: 3 },
+  goalReward: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: colors.gold,
+    marginTop: 5,
+    letterSpacing: 0.7,
+  },
   paused: {
     fontSize: 10,
     fontWeight: '900',
@@ -255,4 +269,5 @@ const styles = StyleSheet.create({
   planDuration: { fontSize: 11, fontWeight: '800', color: colors.muted, marginTop: 3 },
   saved: { fontSize: 11, fontWeight: '900', color: colors.primary },
   planDescription: { fontSize: 13, lineHeight: 19, color: colors.inkSoft },
+  catalogReward: { fontSize: 10, fontWeight: '800', color: colors.gold },
 });

@@ -2,56 +2,85 @@ import type { CampaignId } from '../types';
 
 export interface BibleReferenceTarget {
   book: string;
-  code: string;
+  bookId: string;
   chapter: number;
   verseStart?: number;
   verseEnd?: number;
   campaignId?: CampaignId;
 }
 
-const books: Record<string, { code: string; campaignId?: CampaignId }> = {
-  Matthew: { code: 'MAT' },
-  Mark: { code: 'MRK' },
-  Luke: { code: 'LUK' },
-  John: { code: 'JHN' },
-  Acts: { code: 'ACT' },
-  Romans: { code: 'ROM', campaignId: 'romans' },
-  '1 Corinthians': { code: '1CO' },
-  '2 Corinthians': { code: '2CO' },
-  Galatians: { code: 'GAL' },
-  Ephesians: { code: 'EPH' },
-  Philippians: { code: 'PHP' },
-  Colossians: { code: 'COL' },
-  '1 Thessalonians': { code: '1TH' },
-  '2 Thessalonians': { code: '2TH' },
-  '1 Timothy': { code: '1TI' },
-  '2 Timothy': { code: '2TI' },
-  Titus: { code: 'TIT' },
-  Philemon: { code: 'PHM' },
-  Hebrews: { code: 'HEB' },
-  James: { code: 'JAS' },
-  '1 Peter': { code: '1PE' },
-  '2 Peter': { code: '2PE' },
-  '1 John': { code: '1JN' },
-  '2 John': { code: '2JN' },
-  '3 John': { code: '3JN' },
-  Jude: { code: 'JUD' },
-  Revelation: { code: 'REV' },
-  Joshua: { code: 'JOS' },
-  Judges: { code: 'JDG' },
-  '1 Samuel': { code: '1SA' },
-  '1 Kings': { code: '1KI' },
-  '2 Kings': { code: '2KI' },
-  '2 Chronicles': { code: '2CH' },
-  Nehemiah: { code: 'NEH' },
-  Esther: { code: 'EST' },
-  Psalm: { code: 'PSA' },
-  Proverbs: { code: 'PRO', campaignId: 'proverbs' },
-  Isaiah: { code: 'ISA' },
-  Daniel: { code: 'DAN' },
-};
+const canonicalBooks: Array<[string, string]> = [
+  ['Genesis', 'genesis'],
+  ['Exodus', 'exodus'],
+  ['Leviticus', 'leviticus'],
+  ['Numbers', 'numbers'],
+  ['Deuteronomy', 'deuteronomy'],
+  ['Joshua', 'joshua'],
+  ['Judges', 'judges'],
+  ['Ruth', 'ruth'],
+  ['1 Samuel', '1-samuel'],
+  ['2 Samuel', '2-samuel'],
+  ['1 Kings', '1-kings'],
+  ['2 Kings', '2-kings'],
+  ['1 Chronicles', '1-chronicles'],
+  ['2 Chronicles', '2-chronicles'],
+  ['Ezra', 'ezra'],
+  ['Nehemiah', 'nehemiah'],
+  ['Esther', 'esther'],
+  ['Job', 'job'],
+  ['Psalm', 'psalms'],
+  ['Psalms', 'psalms'],
+  ['Proverbs', 'proverbs'],
+  ['Ecclesiastes', 'ecclesiastes'],
+  ['Song of Solomon', 'song-of-solomon'],
+  ['Isaiah', 'isaiah'],
+  ['Jeremiah', 'jeremiah'],
+  ['Lamentations', 'lamentations'],
+  ['Ezekiel', 'ezekiel'],
+  ['Daniel', 'daniel'],
+  ['Hosea', 'hosea'],
+  ['Joel', 'joel'],
+  ['Amos', 'amos'],
+  ['Obadiah', 'obadiah'],
+  ['Jonah', 'jonah'],
+  ['Micah', 'micah'],
+  ['Nahum', 'nahum'],
+  ['Habakkuk', 'habakkuk'],
+  ['Zephaniah', 'zephaniah'],
+  ['Haggai', 'haggai'],
+  ['Zechariah', 'zechariah'],
+  ['Malachi', 'malachi'],
+  ['Matthew', 'matthew'],
+  ['Mark', 'mark'],
+  ['Luke', 'luke'],
+  ['John', 'john'],
+  ['Acts', 'acts'],
+  ['Romans', 'romans'],
+  ['1 Corinthians', '1-corinthians'],
+  ['2 Corinthians', '2-corinthians'],
+  ['Galatians', 'galatians'],
+  ['Ephesians', 'ephesians'],
+  ['Philippians', 'philippians'],
+  ['Colossians', 'colossians'],
+  ['1 Thessalonians', '1-thessalonians'],
+  ['2 Thessalonians', '2-thessalonians'],
+  ['1 Timothy', '1-timothy'],
+  ['2 Timothy', '2-timothy'],
+  ['Titus', 'titus'],
+  ['Philemon', 'philemon'],
+  ['Hebrews', 'hebrews'],
+  ['James', 'james'],
+  ['1 Peter', '1-peter'],
+  ['2 Peter', '2-peter'],
+  ['1 John', '1-john'],
+  ['2 John', '2-john'],
+  ['3 John', '3-john'],
+  ['Jude', 'jude'],
+  ['Revelation', 'revelation'],
+];
 
-const bookNames = Object.keys(books).sort((a, b) => b.length - a.length);
+const books = new Map(canonicalBooks);
+const bookNames = [...books.keys()].sort((a, b) => b.length - a.length);
 
 export const parseBibleReference = (reference: string): BibleReferenceTarget | undefined => {
   const normalized = reference.replace(/–/g, '-').trim();
@@ -60,24 +89,13 @@ export const parseBibleReference = (reference: string): BibleReferenceTarget | u
   const rest = normalized.slice(book.length).trim();
   const match = rest.match(/^(\d+)(?::(\d+)(?:-(\d+))?)?/);
   if (!match) return undefined;
-  const definition = books[book]!;
+  const bookId = books.get(book)!;
   return {
     book,
-    code: definition.code,
-    campaignId: definition.campaignId,
+    bookId,
+    campaignId: bookId === 'romans' || bookId === 'proverbs' ? bookId : undefined,
     chapter: Number(match[1]),
     verseStart: match[2] ? Number(match[2]) : undefined,
     verseEnd: match[3] ? Number(match[3]) : match[2] ? Number(match[2]) : undefined,
   };
-};
-
-export const biblePassageUrl = (reference: string, translationId: string): string | undefined => {
-  const target = parseBibleReference(reference);
-  if (!target) return undefined;
-  if (translationId === 'b2000')
-    return `https://www.bibeln.se/bibel/B2000/${target.code}.${target.chapter}`;
-  const edition =
-    translationId === 'cuv-s' ? 'cmn-cu89s' : translationId === 'cuv-t' ? 'cmn-cu89t' : 'engwebp';
-  const width = target.code === 'PSA' ? 3 : 2;
-  return `https://ebible.org/${edition}/${target.code}${String(target.chapter).padStart(width, '0')}.htm`;
 };

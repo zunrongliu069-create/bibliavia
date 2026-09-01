@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Scriptora",
-    "slug": "scriptora-scripture",
+    "name": "Bibliavia",
+    "slug": "bibliavia",
     "scheme": "scriptora",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -18,9 +18,13 @@
     },
     "web": {
       "bundler": "metro",
-      "name": "Scriptora"
+      "name": "Bibliavia"
     },
-    "plugins": ["expo-localization", "expo-web-browser"],
+    "plugins": [
+      "expo-localization",
+      "expo-web-browser",
+      "expo-audio"
+    ],
     "locales": {
       "en": "./locales/en.json",
       "sv": "./locales/sv.json",

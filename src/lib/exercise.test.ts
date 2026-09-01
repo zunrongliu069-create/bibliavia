@@ -4,6 +4,7 @@ import {
   adaptiveSequence,
   exactSentenceChoice,
   finishSentenceChoice,
+  lessonModes,
   nextVerseChoice,
   recommendedMode,
   verseMatchPairs,
@@ -41,18 +42,26 @@ describe('adaptive exercises', () => {
     expect(exercise.prompt).toContain('____');
     expect(exercise.options).toContain(exercise.correct);
   });
-  it('removes listening from the adaptive exercise pool', () => {
-    expect(adaptiveSequence).not.toContain('listen');
+  it('includes optional listening and speaking exercises', () => {
+    expect(adaptiveSequence).toContain('listen');
+    expect(lessonModes).toHaveLength(10);
+    expect(lessonModes).toEqual(expect.arrayContaining(['listen', 'speak']));
     expect(adaptiveSequence).toEqual(
       expect.arrayContaining([
         'finish',
         'sentenceCheck',
-        'match',
-        'contextChoice',
+        'initials',
+        'keywords',
         'speak',
         'recall',
       ]),
     );
+  });
+  it('does not schedule exercises that reveal future verses', () => {
+    expect(adaptiveSequence).not.toContain('match');
+    expect(adaptiveSequence).not.toContain('contextChoice');
+    expect(lessonModes).not.toContain('match');
+    expect(lessonModes).not.toContain('contextChoice');
   });
   it('creates a two-choice sentence ending', () => {
     const exercise = finishSentenceChoice(verse);

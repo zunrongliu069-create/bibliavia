@@ -1,48 +1,36 @@
-# Scriptora lesson-flow visual QA
+# Scriptora Path option 3 — visual QA
 
-- Source visual truth: live Path screen using `assets/game/scriptora-path-world.png`
-- Implementation: live `ReviewScreen` lesson intro and practice states at `http://localhost:4173/`
-- Viewport: 607 × 898 CSS pixels, device scale factor 1
-- Source and implementation density: browser-rendered at 1 CSS pixel per screenshot pixel
-- State: Path → Start Adventure → lesson intro → practice
+- Source: `docs/path-design-option-3.png`
+- Implementation: `docs/path-option-3-mobile.png`
+- Combined comparison: `docs/path-design-qa-comparison.png`
+- Viewport: 430 × 932 CSS pixels
+- State: Path, Romans 1, first lesson current
 
-## Full-view comparison evidence
+## Fidelity review
 
-Before the preview server stopped, the Path reference and revised lesson intro/practice screens were opened and visually inspected at the same viewport. The lesson now reuses the same illustrated world, midnight overlay, purple panels, gold borders, gold primary emphasis, strong white display type, rounded game controls, and chest artwork as Path.
+- Structure: purple chapter panel, book switch, central lesson trail, expanded current lesson, gold CTA, manuscript margins, and fixed dark navigation match the selected direction.
+- Typography and color: serif lesson hierarchy, parchment, violet, antique gold, mint, and lavender match the source palette.
+- Assets: the parchment and illuminated Bible miniatures are original high-resolution raster art generated for the screen; Ionicons supply functional UI icons.
+- Responsive layout: the screen remains scrollable and unclipped at the mobile viewport.
 
-## Focused comparison evidence
+## Interaction review
 
-- Intro: purple-and-gold adventure panel, bordered star badge, readable lesson facts, primary start action, and secondary exit action.
-- Practice: dark HUD, visible hearts and progress, gold stage strip, purple exercise panel, white verse text, and parchment answer controls.
-- Cursor: browser-computed button cursor returned `pointer`; the cursor-hiding stylesheet was removed.
+- Romans/Proverbs switching remains connected to the app store.
+- Chapter chooser opens, exposes accessible chapter buttons, changes chapters, and closes.
+- Lesson node and Start Adventure open the correct lesson introduction.
+- No current runtime error appeared after the final reload. Earlier module-resolution messages were transient while the screen file was being replaced.
 
-## Fidelity surfaces
+## Fix history
 
-- Fonts and typography: hierarchy and weight match the Path treatment; the existing native font remains an accepted P3 difference from illustrated display lettering.
-- Spacing and layout rhythm: intro and practice fit the portrait viewport and reset to the top when the phase changes.
-- Colors and tokens: Path purple, warm gold, midnight navy, parchment, mint, and coral are reused throughout the lesson.
-- Image quality: the original high-resolution Scriptora world and chest assets are reused without placeholders.
-- Copy and content: the lesson now follows the master specification's 3 + 4 + 3 structure, ten exercises, three checkpoints, and cumulative 20/35/50 XP stages.
-
-## Comparison history
-
-1. P1 — the original lesson used a flat parchment background and visually disconnected white cards.
-   - Fix: carried the Path world, purple/gold panels, fantasy HUD, typography hierarchy, and reward styling through intro, exercises, checkpoints, and chest screens.
-   - Post-fix evidence: intro and practice browser captures visibly match the Path art direction.
-2. P2 — entering an exercise could inherit the previous page's scroll position.
-   - Fix: reset scroll position at every lesson phase and exercise transition.
-   - Post-fix evidence: browser evaluation returned scroll position 0 after the change.
-3. P2 — secondary exit text had insufficient contrast on the purple panel.
-   - Fix: changed lesson exit and reward exit actions to the readable secondary button treatment.
-
-## Remaining blocker
-
-The local preview server stopped during final flow testing. It has been restarted and returns HTTP 200, but the browser security policy rejected reloading the already-claimed localhost tab. Therefore the revised ten-exercise checkpoint and reward states could not receive the required final browser capture and console check in this run.
+1. P1 — chapter choices lacked button semantics on web.
+   - Fixed with explicit button roles and chapter labels; verified in the live DOM.
+2. P2 — the first asset pass was denser than the mock.
+   - Kept copy code-rendered and placed it on translucent parchment to preserve readability across the illustrated background.
 
 ## Automated verification
 
+- Formatting: passed.
 - TypeScript: passed.
-- Tests: 35/35 passed.
-- Local preview: running on port 4173 and responding successfully.
+- Tests: 66/66 passed.
 
-final result: blocked
+final result: passed

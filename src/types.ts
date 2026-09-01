@@ -19,6 +19,88 @@ export type ExerciseMode =
   | 'speak'
   | 'context';
 export type CampaignId = 'romans' | 'proverbs';
+export type BibleBookId = string;
+export type PathActivityType = 'reading' | 'memorization' | 'review' | 'challenge';
+export type PathTone = 'triumphant' | 'reflective' | 'solemn' | 'hopeful';
+export type PathSource = 'curated' | 'user';
+export type PathKind = 'reading' | 'memorization' | 'mixed';
+
+export interface PathBeatDefinition {
+  id: string;
+  title: string;
+  titles?: Partial<Record<UiLanguage, string>>;
+  target: number;
+  parentId?: string;
+  nextIds?: string[];
+  tone?: PathTone;
+  passage?: BiblePassageReference;
+  passages?: BiblePassageReference[];
+  milestone?: boolean;
+  discovery?: Partial<Record<UiLanguage, string>>;
+}
+
+export interface PathDefinition {
+  id: string;
+  title: string;
+  titles?: Partial<Record<UiLanguage, string>>;
+  source: PathSource;
+  kind: PathKind;
+  target?: number;
+  beats?: PathBeatDefinition[];
+  bibleVersionId?: string;
+  passage?: BiblePassageReference;
+}
+
+export interface BiblePassageReference {
+  bookId: BibleBookId;
+  startChapter: number;
+  startVerse: number;
+  endChapter: number;
+  endVerse: number;
+}
+
+export interface PathState {
+  pathId: string;
+  status: 'active' | 'completed';
+  activeBeatIds: string[];
+  beatProgress: Record<string, number>;
+  pathProgress: number;
+  completedBeatIds: string[];
+  completedAt: string | null;
+  lastActivityAt: string | null;
+  activityCounts: Record<string, number>;
+  mastery?: {
+    status: 'not-started' | 'refreshing' | 'retained';
+    retainedBeatIds: string[];
+    lastCheckedAt: string | null;
+  };
+}
+export type FeedbackEventType =
+  | 'ACTIVITY_CORRECT'
+  | 'ACTIVITY_WRONG'
+  | 'ACTIVITY_PARTIAL'
+  | 'PATH_PROGRESS'
+  | 'BEAT_COMPLETED'
+  | 'PATH_COMPLETED'
+  | 'MAJOR_UNLOCK'
+  | 'FRAGMENT_REVEALED';
+
+export interface FeedbackSettings {
+  soundEffects: boolean;
+  ambientMusic: boolean;
+  haptics: boolean;
+  reduceMotion: boolean;
+}
+
+export interface FeedbackEvent {
+  id: string;
+  type: FeedbackEventType;
+  tier: 1 | 2 | 3 | 4;
+  tone: PathTone;
+  message: string;
+  amount?: number;
+  diminishingLevel?: number;
+}
 export type CharacterRarity = 'common' | 'rare' | 'epic' | 'legendary';
 export type BiblePeriodId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 export type ShopItem =
@@ -66,15 +148,39 @@ export interface TranslationLicense {
   digitalUse: 'allowed' | 'permission-required' | 'unknown';
   attribution: string | null;
   sourceUrl: string;
+  sourceChecksum: string | null;
   verifiedAt: string;
   publicBuild: boolean;
   developmentBuild?: boolean;
+  redistributionAllowed: boolean;
+  contentAvailable: boolean;
+}
+
+export interface BibleVerseContent {
+  number: number;
+  text: string;
+}
+
+export interface BibleChapterContent {
+  number: number;
+  verses: BibleVerseContent[];
+}
+
+export interface BibleBookContent {
+  id: BibleBookId;
+  code: string;
+  name: string;
+  chapters: BibleChapterContent[];
+}
+
+export interface BibleVersion extends TranslationLicense {
+  books: BibleBookContent[];
 }
 
 export interface Verse {
   id: string;
   translationId: string;
-  bookId: CampaignId;
+  bookId: BibleBookId;
   bookName: string;
   chapter: number;
   verseStart: number;
@@ -126,9 +232,14 @@ export interface UserProgress {
   activeDates: string[];
   lastPracticeDate: string | null;
   activeCampaign: CampaignId;
+  pathStates?: Record<string, PathState>;
+  activePathIds?: string[];
+  customPaths?: PathDefinition[];
+  focusedPathId?: string | null;
   pathChapter: Record<CampaignId, number>;
   chapterOneStartVersion?: number;
   lessonProgress: Record<string, number>;
+  completedLessonIds: string[];
   characterShards: Record<string, number>;
   wildShards: number;
   streakFreezes: number;
@@ -138,10 +249,17 @@ export interface UserProgress {
   activeGoldBoosterUntil: string | null;
   collectionInitialized: boolean;
   targetCharacter: CharacterId;
+  fragments: number;
+  unlockedHeroSlots: number;
+  activeCharacters: CharacterId[];
   openedChests: Record<string, number>;
   claimedStageRewards: Record<string, boolean>;
   claimedLevelRewards: number[];
+  claimedJourneyBeats: string[];
   claimedPeriodMastery: BiblePeriodId[];
+  claimedDailyGoals: string[];
+  claimedDailyQuests: string[];
+  claimedAchievements: string[];
   dailyXp: Record<string, number>;
   lastDailyFreeClaim: string | null;
   rewardHistory: ChestReward[];

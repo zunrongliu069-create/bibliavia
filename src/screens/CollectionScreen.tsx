@@ -10,22 +10,37 @@ import {
   periodState,
 } from '../data/periods';
 import { characterLevel } from '../lib/achievements';
+import {
+  characterSetBonuses,
+  characterSpecialties,
+  completedCharacterSets,
+} from '../lib/characterBonuses';
 import { t } from '../lib/i18n';
+import { uiText } from '../lib/uiText';
+import { heroCapacity, heroSlotCost, MAX_ACTIVE_HEROES } from '../lib/heroSlots';
 import { dailyShardShopOffers } from '../lib/shardShop';
-import { dailyFreeOfferFor, resourceShopOffers } from '../lib/shop';
+import {
+  CHARACTER_SHARD_OFFER,
+  dailyFreeOfferFor,
+  priceForCharacterShards,
+  resourceShopOffers,
+} from '../lib/shop';
 import { levelForXp } from '../lib/level';
 import { colors, radius } from '../theme';
 import type { BiblePeriodId, CharacterId, CharacterRarity } from '../types';
 import { useAppStore } from '../store/AppStore';
+import { ChestRewardScreen } from './ReviewScreen';
 
 type Filter = 'all' | CharacterRarity;
 const rarityOrder: Record<CharacterRarity, number> = { common: 0, rare: 1, epic: 2, legendary: 3 };
 
 export function CollectionScreen() {
   const store = useAppStore();
+  const u = (text: string) => uiText(store.uiLanguage, text);
   const [filter, setFilter] = useState<Filter>('all');
   const [periodId, setPeriodId] = useState<BiblePeriodId>(1);
   const [selected, setSelected] = useState<CharacterId | null>(null);
+  const [openingDailyChest, setOpeningDailyChest] = useState(false);
   const periodProgress = biblePeriods.map((period) => {
     const members = characters.filter((character) => character.period === period.id);
     const unlocked = members.filter(
@@ -65,15 +80,37 @@ export function CollectionScreen() {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const dailyFree = dailyFreeOfferFor(Math.floor(Date.now() / 86_400_000));
   const dailyClaimed = store.progress.lastDailyFreeClaim === today;
+  if (openingDailyChest) {
+    return (
+      <ChestRewardScreen
+        language={store.uiLanguage}
+        baseTier={1}
+        seed={`daily-${today}`}
+        scores={[1]}
+        onReveal={(tier) => {
+          const reward = store.openChest(`daily-${today}`, tier);
+          store.claimDailyFree();
+          return reward;
+        }}
+        onNext={() => setOpeningDailyChest(false)}
+        onClose={() => setOpeningDailyChest(false)}
+      />
+    );
+  }
   if (selected) {
     const character = characterById(selected);
     const shards = store.progress.characterShards[selected] ?? 0;
     const unlocked = shards >= character.unlockCost;
     const periodLocked = character.period > highestUnlockedPeriod;
-    const active = store.progress.targetCharacter === selected;
+    const active = store.progress.activeCharacters.includes(selected);
+    const slotsFull =
+      store.progress.activeCharacters.length >= heroCapacity(store.progress.unlockedHeroSlots);
     const level = characterLevel(shards, character.unlockCost);
     const levelStart = level === 0 ? 0 : character.unlockCost * level;
     const levelTarget = character.unlockCost * (level + 1);
+    const specialty = characterSpecialties[character.id];
+    const relatedSets = characterSetBonuses.filter((set) => set.members.includes(character.id));
+    const completedSets = new Set(completedCharacterSets(store.progress).map((set) => set.id));
     return (
       <ScrollView contentContainerStyle={styles.detailPage}>
         <Pressable
@@ -113,11 +150,30 @@ export function CollectionScreen() {
         </Text>
         {periodLocked && (
           <Text style={styles.lockedNotice}>
-            Preview only · Reach level {biblePeriods[character.period - 1]!.unlockLevel} to unlock
-            this period.
+            {u('Preview only')} · {u('Reach level')}{' '}
+            {biblePeriods[character.period - 1]!.unlockLevel} {u('to unlock this period')}.
           </Text>
         )}
         <Text style={styles.detailDescription}>{character.description[store.uiLanguage]}</Text>
+        <View style={styles.infoCard}>
+          <Eyebrow>{u('SPECIALTY')}</Eyebrow>
+          <Text style={styles.books}>{u(specialty ? specialty.role : 'Collection / Lore')}</Text>
+          <Text style={styles.refs}>
+            {specialty
+              ? u(specialty.description)
+              : u('No active gameplay effect. Still counts toward collection and Period Mastery.')}
+          </Text>
+        </View>
+        {relatedSets.length > 0 && (
+          <View style={styles.infoCard}>
+            <Eyebrow>{u('CHARACTER SETS')}</Eyebrow>
+            {relatedSets.map((set) => (
+              <Text key={set.id} style={styles.refs}>
+                {completedSets.has(set.id) ? '✓' : '○'} {u(set.name)} · {u(set.description)}
+              </Text>
+            ))}
+          </View>
+        )}
         <View style={styles.progressCard}>
           <View style={styles.rowBetween}>
             <Text style={styles.progressTitle}>
@@ -143,19 +199,19 @@ export function CollectionScreen() {
           <Text style={styles.refs}>{character.references.join('  •  ')}</Text>
         </View>
         <Button
-          label={active ? t(store.uiLanguage, 'activeTarget') : t(store.uiLanguage, 'chooseTarget')}
+          label={u(active ? 'Remove active Hero' : 'Activate Hero')}
           variant={active ? 'secondary' : 'primary'}
-          disabled={active || periodLocked}
-          onPress={() => store.setTargetCharacter(character.id)}
+          disabled={!unlocked || periodLocked || (!active && slotsFull)}
+          onPress={() => store.toggleActiveCharacter(character.id)}
         />
         <Button
-          label={`🪙 500 · ${t(store.uiLanguage, 'buyShards')}`}
+          label={`🪙 ${CHARACTER_SHARD_OFFER.price} · +${CHARACTER_SHARD_OFFER.amount} ${t(store.uiLanguage, 'shards')}`}
           variant="secondary"
-          disabled={store.progress.gold < 500 || periodLocked}
+          disabled={store.progress.gold < CHARACTER_SHARD_OFFER.price || periodLocked}
           onPress={() => store.buyCharacterShards(character.id)}
         />
         <Button
-          label={`🃏 ${store.progress.wildShards} · Apply 1 Wild Shard`}
+          label={`🃏 ${store.progress.wildShards} · ${u('Apply 1 Wild Shard')}`}
           variant="secondary"
           disabled={store.progress.wildShards < 1 || periodLocked}
           onPress={() => store.applyWildShard(character.id)}
@@ -168,7 +224,7 @@ export function CollectionScreen() {
     <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}>
       <View style={styles.heading}>
         <View>
-          <Text style={styles.logo}>SCRIPTORA</Text>
+          <Text style={styles.logo}>BIBLIAVIA</Text>
           <Text style={styles.title}>{t(store.uiLanguage, 'collection')}</Text>
           <Text style={styles.subtitle}>
             {collected} / {characters.length} {t(store.uiLanguage, 'characterCards')}
@@ -177,6 +233,39 @@ export function CollectionScreen() {
         <View style={styles.gold}>
           <Text style={styles.goldText}>🪙 {store.progress.gold}</Text>
         </View>
+      </View>
+      <View style={styles.heroSlots}>
+        <View style={styles.rowBetween}>
+          <View>
+            <Eyebrow>{u('ACTIVE HEROES')}</Eyebrow>
+            <Text style={styles.slotHint}>{u('Combine Hero abilities strategically.')}</Text>
+          </View>
+          <Text style={styles.fragments}>◆ {store.progress.fragments}</Text>
+        </View>
+        <View style={styles.slotRow}>
+          {Array.from({ length: MAX_ACTIVE_HEROES }, (_, index) => {
+            const unlockedSlot = index < heroCapacity(store.progress.unlockedHeroSlots);
+            const hero = characters.find(
+              (character) => character.id === store.progress.activeCharacters[index],
+            );
+            return (
+              <View key={index} style={[styles.heroSlot, !unlockedSlot && styles.heroSlotLocked]}>
+                <Text style={styles.heroSlotIcon}>{hero ? '✦' : unlockedSlot ? '+' : '🔒'}</Text>
+                <Text numberOfLines={1} style={styles.heroSlotName}>
+                  {hero?.names[store.uiLanguage] ?? u(unlockedSlot ? 'Empty' : 'Locked')}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+        {store.progress.unlockedHeroSlots < 3 && (
+          <Button
+            label={`${u('Unlock Hero Slot')} · ◆ ${heroSlotCost(store.progress.unlockedHeroSlots)}`}
+            variant="secondary"
+            disabled={store.progress.fragments < heroSlotCost(store.progress.unlockedHeroSlots)!}
+            onPress={store.unlockHeroSlot}
+          />
+        )}
       </View>
       <View style={styles.periodSection}>
         <ScrollView
@@ -191,7 +280,7 @@ export function CollectionScreen() {
                 key={period.id}
                 accessibilityRole="button"
                 onPress={() => setPeriodId(period.id)}
-                accessibilityLabel={`${period.names[store.uiLanguage]}${locked ? ' · locked preview' : ''}`}
+                accessibilityLabel={`${period.names[store.uiLanguage]}${locked ? ` · ${u('locked preview')}` : ''}`}
                 style={[
                   styles.periodCard,
                   periodId === period.id && styles.periodCardActive,
@@ -211,8 +300,8 @@ export function CollectionScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.periodSummaryTitle}>{selectedPeriod.names[store.uiLanguage]}</Text>
             <Text style={styles.periodSummaryText}>
-              {periodState(selectedPeriod.percentage)} · {selectedPeriod.unlocked}/
-              {selectedPeriod.total} · Unlock level {selectedPeriod.unlockLevel}
+              {u(periodState(selectedPeriod.percentage))} · {selectedPeriod.unlocked}/
+              {selectedPeriod.total} · {u('Unlock level')} {selectedPeriod.unlockLevel}
             </Text>
           </View>
           <Text style={styles.periodSummaryPercent}>{selectedPeriod.percentage}%</Text>
@@ -222,8 +311,12 @@ export function CollectionScreen() {
           <Button
             label={
               store.progress.claimedPeriodMastery.includes(selectedPeriod.id)
-                ? 'Period Mastery claimed'
-                : 'Claim Period Mastery · 150 Gold + 10 Wild Shards'
+                ? u('Period Mastery claimed')
+                : u(
+                    selectedPeriod.id === 10
+                      ? 'Claim Period Mastery · 150 Gold + 10 Wild Shards + 1 Fragment'
+                      : 'Claim Period Mastery · 150 Gold + 10 Wild Shards',
+                  )
             }
             disabled={store.progress.claimedPeriodMastery.includes(selectedPeriod.id)}
             onPress={() => store.claimPeriodMastery(selectedPeriod.id)}
@@ -233,23 +326,29 @@ export function CollectionScreen() {
       <View style={styles.shop}>
         <View style={styles.rowBetween}>
           <View>
-            <Eyebrow>SHOP</Eyebrow>
-            <Text style={styles.shopHint}>Characters, shards, boosters and daily rewards.</Text>
+            <Eyebrow>{u('SHOP')}</Eyebrow>
+            <Text style={styles.shopHint}>
+              {u('Characters, shards, boosters and daily rewards.')}
+            </Text>
           </View>
           <Text style={styles.rotate}>↻ {t(store.uiLanguage, 'shopRotates')}</Text>
         </View>
         <View style={styles.dailyFree}>
           <Text style={styles.resourceIcon}>{dailyFree.icon}</Text>
           <View style={{ flex: 1 }}>
-            <Text style={styles.resourceName}>Daily free · {dailyFree.label}</Text>
-            <Text style={styles.resourceOwned}>One free reward every day</Text>
+            <Text style={styles.resourceName}>
+              {u('Daily free')} · {u(dailyFree.label)}
+            </Text>
+            <Text style={styles.resourceOwned}>{u('One free reward every day')}</Text>
           </View>
           <Pressable
             disabled={dailyClaimed}
-            onPress={store.claimDailyFree}
+            onPress={() =>
+              dailyFree.kind === 'chest' ? setOpeningDailyChest(true) : store.claimDailyFree()
+            }
             style={[styles.buy, dailyClaimed && { opacity: 0.4 }]}
           >
-            <Text style={styles.buyText}>{dailyClaimed ? 'Claimed' : 'Free'}</Text>
+            <Text style={styles.buyText}>{u(dailyClaimed ? 'Claimed' : 'Free')}</Text>
           </Pressable>
         </View>
         <Eyebrow>{t(store.uiLanguage, 'shardShop').toUpperCase()}</Eyebrow>
@@ -258,44 +357,53 @@ export function CollectionScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.offers}
         >
-          {shopOffers.map((character) => (
-            <View
-              key={character.id}
-              style={[styles.offer, { borderColor: rarityColors[character.rarity] }]}
-            >
-              {character.image ? (
-                <Image source={character.image} style={styles.offerImage} />
-              ) : (
-                <View style={[styles.offerImage, styles.portraitPlaceholder]}>
-                  <Text style={styles.portraitPlaceholderText}>
-                    {biblePeriods[character.period - 1]!.icon}
-                  </Text>
-                </View>
-              )}
-              <Text numberOfLines={1} style={styles.offerName}>
-                {character.names[store.uiLanguage]}
-              </Text>
-              <Text style={[styles.offerRarity, { color: rarityColors[character.rarity] }]}>
-                {t(store.uiLanguage, character.rarity).toUpperCase()}
-              </Text>
-              <Text style={styles.offerShards}>
-                🧩 {store.progress.characterShards[character.id] ?? 0}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${t(store.uiLanguage, 'buyShards')} ${character.names[store.uiLanguage]}`}
-                disabled={store.progress.gold < 500}
-                onPress={() => store.buyCharacterShards(character.id)}
-                style={[styles.buy, store.progress.gold < 500 && { opacity: 0.4 }]}
+          {shopOffers.map((character) => {
+            const price = priceForCharacterShards(character.shardAmount);
+            return (
+              <View
+                key={character.id}
+                style={[styles.shopOfferCard, { borderColor: rarityColors[character.rarity] }]}
               >
-                <Text style={styles.buyText}>🪙 500 · +5</Text>
-              </Pressable>
-            </View>
-          ))}
+                {character.image ? (
+                  <Image source={character.image} style={styles.offerImage} />
+                ) : (
+                  <View style={[styles.offerImage, styles.portraitPlaceholder]}>
+                    <Text style={styles.portraitPlaceholderText}>
+                      {biblePeriods[character.period - 1]!.icon}
+                    </Text>
+                  </View>
+                )}
+                <Text numberOfLines={1} style={styles.offerName}>
+                  {character.names[store.uiLanguage]}
+                </Text>
+                <Text style={[styles.offerRarity, { color: rarityColors[character.rarity] }]}>
+                  {t(store.uiLanguage, character.rarity).toUpperCase()}
+                </Text>
+                <Text style={styles.offerShards}>
+                  🧩 {store.progress.characterShards[character.id] ?? 0}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${u('Buy')} ${character.shardAmount} ${t(store.uiLanguage, 'shards')} · ${character.names[store.uiLanguage]}`}
+                  disabled={store.progress.gold < price}
+                  onPress={() => store.buyCharacterShards(character.id, character.shardAmount)}
+                  style={[
+                    styles.buy,
+                    styles.shopBuy,
+                    store.progress.gold < price && { opacity: 0.4 },
+                  ]}
+                >
+                  <Text style={styles.buyText}>
+                    🪙 {price} · +{character.shardAmount}
+                  </Text>
+                </Pressable>
+              </View>
+            );
+          })}
         </ScrollView>
         <View>
-          <Eyebrow>RESOURCES</Eyebrow>
-          <Text style={styles.shopHint}>Boosters, Wild Shards and Streak Freezes.</Text>
+          <Eyebrow>{u('RESOURCES')}</Eyebrow>
+          <Text style={styles.shopHint}>{u('Boosters, Wild Shards and Streak Freezes.')}</Text>
         </View>
         <ScrollView
           horizontal
@@ -315,14 +423,22 @@ export function CollectionScreen() {
                   ] ?? 0)
                 : 0;
             return (
-              <View key={offer.id} style={styles.resourceOffer}>
+              <View key={offer.id} style={styles.shopOfferCard}>
                 <Text style={styles.resourceIcon}>{offer.icon}</Text>
-                <Text style={styles.resourceName}>{offer.label}</Text>
-                {boosterType && <Text style={styles.resourceOwned}>Owned: {count}</Text>}
+                <Text style={styles.resourceName}>{u(offer.label)}</Text>
+                {boosterType && (
+                  <Text style={styles.resourceOwned}>
+                    {u('Owned')}: {count}
+                  </Text>
+                )}
                 <Pressable
                   disabled={store.progress.gold < offer.price}
                   onPress={() => store.buyShopItem(offer.item)}
-                  style={[styles.buy, store.progress.gold < offer.price && { opacity: 0.4 }]}
+                  style={[
+                    styles.buy,
+                    styles.shopBuy,
+                    store.progress.gold < offer.price && { opacity: 0.4 },
+                  ]}
                 >
                   <Text style={styles.buyText}>🪙 {offer.price}</Text>
                 </Pressable>
@@ -331,7 +447,7 @@ export function CollectionScreen() {
                     onPress={() => store.activateBooster(boosterType, duration)}
                     style={[styles.buy, styles.activate]}
                   >
-                    <Text style={styles.buyText}>Activate</Text>
+                    <Text style={styles.buyText}>{u('Activate')}</Text>
                   </Pressable>
                 )}
               </View>
@@ -358,7 +474,7 @@ export function CollectionScreen() {
         {visible.map((character) => {
           const shards = store.progress.characterShards[character.id] ?? 0;
           const unlocked = shards >= character.unlockCost;
-          const active = store.progress.targetCharacter === character.id;
+          const active = store.progress.activeCharacters.includes(character.id);
           const level = characterLevel(shards, character.unlockCost);
           return (
             <Pressable
@@ -400,6 +516,9 @@ export function CollectionScreen() {
               </View>
               <Text numberOfLines={1} style={styles.cardName}>
                 {character.names[store.uiLanguage]}
+              </Text>
+              <Text numberOfLines={1} style={styles.cardAbility}>
+                ✦ {u(characterSpecialties[character.id]!.role)}
               </Text>
               <Text style={[styles.cardRarity, { color: rarityColors[character.rarity] }]}>
                 {t(store.uiLanguage, character.rarity).toUpperCase()}
@@ -492,6 +611,32 @@ const styles = StyleSheet.create({
     gap: 13,
   },
   shopHint: { fontSize: 12, color: colors.inkSoft, marginTop: 4, maxWidth: 340 },
+  heroSlots: {
+    gap: 12,
+    padding: 15,
+    backgroundColor: '#FFF9E8',
+    borderWidth: 2,
+    borderColor: colors.gold,
+    borderRadius: radius.lg,
+  },
+  slotHint: { color: colors.muted, fontSize: 11, marginTop: 3 },
+  fragments: { color: colors.primary, fontSize: 18, fontWeight: '900' },
+  slotRow: { flexDirection: 'row', gap: 7 },
+  heroSlot: {
+    flex: 1,
+    minWidth: 0,
+    height: 62,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    backgroundColor: colors.white,
+  },
+  heroSlotLocked: { borderColor: colors.line, backgroundColor: '#EEEAF3' },
+  heroSlotIcon: { fontSize: 16 },
+  heroSlotName: { maxWidth: '90%', color: colors.ink, fontSize: 8, fontWeight: '800' },
   dailyFree: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -504,21 +649,9 @@ const styles = StyleSheet.create({
   },
   rotate: { fontSize: 10, color: colors.muted, maxWidth: 110, textAlign: 'right' },
   offers: { gap: 8 },
-  offer: {
-    width: 102,
-    backgroundColor: colors.card,
-    borderRadius: radius.md,
-    padding: 8,
-    gap: 4,
-    borderWidth: 2,
-  },
-  offerImage: { width: 56, height: 66, borderRadius: radius.sm, alignSelf: 'center' },
-  offerName: { fontSize: 12, fontWeight: '900', color: colors.ink },
-  offerRarity: { fontSize: 8, fontWeight: '900', letterSpacing: 0.5 },
-  offerShards: { fontSize: 10, color: colors.muted },
-  resourceOffer: {
+  shopOfferCard: {
     width: 126,
-    minHeight: 146,
+    height: 190,
     backgroundColor: colors.card,
     borderRadius: radius.md,
     padding: 10,
@@ -526,6 +659,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
   },
+  offerImage: { width: 56, height: 66, borderRadius: radius.sm, alignSelf: 'center' },
+  offerName: { fontSize: 12, fontWeight: '900', color: colors.ink },
+  offerRarity: { fontSize: 8, fontWeight: '900', letterSpacing: 0.5 },
+  offerShards: { fontSize: 10, color: colors.muted },
   resourceIcon: { fontSize: 25 },
   resourceName: {
     minHeight: 31,
@@ -544,6 +681,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 3,
     borderColor: '#765215',
   },
+  shopBuy: { marginTop: 'auto' },
   buyText: { fontSize: 10, fontWeight: '900', color: colors.white },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   filter: {
@@ -615,6 +753,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textAlign: 'center',
   },
+  cardAbility: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.primary,
+    textAlign: 'center',
+  },
   cardRarity: { fontSize: 9, fontWeight: '900', letterSpacing: 0.7, textAlign: 'center' },
   shardRow: { flexDirection: 'row', justifyContent: 'center' },
   shardCount: { fontSize: 10, fontWeight: '800', color: colors.inkSoft },
@@ -623,18 +767,18 @@ const styles = StyleSheet.create({
   backText: { fontWeight: '800', color: colors.ink },
   heroFrame: {
     alignSelf: 'center',
-    width: '58%',
-    maxWidth: 220,
-    borderWidth: 4,
-    borderRadius: radius.lg,
-    padding: 5,
+    width: 86,
+    height: 100,
+    borderWidth: 3,
+    borderRadius: radius.md,
+    padding: 3,
     backgroundColor: colors.white,
   },
-  heroImage: { width: '100%', aspectRatio: 0.84, borderRadius: radius.md },
+  heroImage: { width: 74, height: 88, borderRadius: radius.sm },
   rarityBadge: {
     position: 'absolute',
-    bottom: 12,
-    left: 12,
+    bottom: 4,
+    left: 4,
     paddingHorizontal: 9,
     paddingVertical: 5,
     borderRadius: radius.pill,
@@ -642,8 +786,8 @@ const styles = StyleSheet.create({
   rarityBadgeText: { fontSize: 9, fontWeight: '900', color: colors.white, letterSpacing: 1 },
   levelBadge: {
     position: 'absolute',
-    bottom: 12,
-    right: 12,
+    bottom: 4,
+    right: 4,
     backgroundColor: colors.ink,
     paddingHorizontal: 9,
     paddingVertical: 5,

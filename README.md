@@ -1,6 +1,6 @@
-# Scriptora
+# Bibliavia
 
-Scriptora is an offline-first, multilingual Scripture memorization MVP for iOS, Android, and web. It couples active recall and adaptive spaced repetition with a guided Romans/Proverbs campaign and restrained, learning-linked game mechanics.
+Bibliavia is an offline-first, multilingual Scripture memorization MVP for iOS, Android, and web. It couples active recall and adaptive spaced repetition with a guided Bible journey and learning-linked game mechanics.
 
 ## What works now
 
@@ -11,11 +11,11 @@ Scriptora is an offline-first, multilingual Scripture memorization MVP for iOS, 
 - Daily quests, learning-weighted XP, streaks, levels, weak-verse prioritization, boss checkpoints, and chapter plans.
 - English, Swedish, Simplified Chinese, and Traditional Chinese UI.
 - UI language, Bible language, and translation are independent.
-- The complete 433-verse Simplified Chinese CUV Romans text, imported from a verified public-domain source, plus source-linked starter text for other configured translations. Bibel 2000 is excluded pending permission.
+- Complete 66-book local WEB, Simplified CUV and Traditional CUV content imported from eBible.org editions marked public domain: 31,098 / 31,021 / 31,021 non-empty verses. Reading, Memorization, Review, Challenge and Paths share one content API. Bibel 2000 remains configured but disabled and contains no text pending permission.
 - Complete Romans and Proverbs chapter/group/test plans.
 - Eight guided reading plans: two Gospel plans, the complete New Testament in 90 days, and five themed plans from 7 to 31 days, with offline progress and pause/resume.
 
-This is a private MVP, not a production release. Accounts, cloud sync, audio/speech, full licensed content, server-authoritative progression, social features, and store submission work remain on the roadmap.
+This is a private MVP, not a production release. Production-grade speech, legal release review, server-authoritative progression, social features, and store submission work remain on the roadmap.
 
 ## Run
 

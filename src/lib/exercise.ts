@@ -9,13 +9,25 @@ export const adaptiveSequence: ExerciseMode[] = [
   'sentenceCheck',
   'understand',
   'reorder',
-  'match',
   'initials',
   'keywords',
-  'contextChoice',
+  'listen',
   'speak',
   'recall',
   'context',
+];
+
+export const lessonModes: ExerciseMode[] = [
+  'read',
+  'listen',
+  'finish',
+  'choice',
+  'sentenceCheck',
+  'reorder',
+  'initials',
+  'keywords',
+  'speak',
+  'recall',
 ];
 
 export function recommendedMode(mastery?: Mastery): ExerciseMode {

@@ -13,9 +13,9 @@ describe('Bible periods', () => {
       true,
     );
     expect(biblePeriods.map((period) => period.unlockLevel)).toEqual([
-      1, 3, 6, 9, 13, 17, 22, 27, 33, 40,
+      1, 20, 40, 60, 80, 100, 120, 140, 160, 180,
     ]);
-    expect([1, 3, 21, 40].map(highestUnlockedPeriodForLevel)).toEqual([1, 2, 6, 10]);
+    expect([1, 20, 39, 180].map(highestUnlockedPeriodForLevel)).toEqual([1, 2, 2, 10]);
   });
 
   it('uses the specified period progress states', () => {

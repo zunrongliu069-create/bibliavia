@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { getPassage } from './content';
 import { readingPlanById, readingPlans } from './readingPlans';
-import { biblePassageUrl, parseBibleReference } from '../lib/bibleLinks';
+import { parseBibleReference } from '../lib/bibleLinks';
 
 describe('reading plans', () => {
   it('keeps every plan aligned with its advertised duration', () => {
@@ -45,17 +46,29 @@ describe('reading plans', () => {
     for (const plan of readingPlans)
       for (const day of plan.days)
         for (const reference of day.references.en) {
+          const target = parseBibleReference(reference);
+          expect(target, `${plan.id} day ${day.day}: ${reference}`).toBeDefined();
           expect(
-            parseBibleReference(reference),
-            `${plan.id} day ${day.day}: ${reference}`,
-          ).toBeDefined();
-          expect(biblePassageUrl(reference, 'webp')).toMatch(/^https:\/\/ebible\.org\/engwebp\//);
-          expect(biblePassageUrl(reference, 'cuv-s')).toMatch(
-            /^https:\/\/ebible\.org\/cmn-cu89s\//,
-          );
-          expect(biblePassageUrl(reference, 'b2000')).toMatch(
-            /^https:\/\/www\.bibeln\.se\/bibel\/B2000\//,
-          );
+            getPassage(
+              'webp',
+              target!.bookId,
+              target!.chapter,
+              target!.verseStart ?? 1,
+              target!.chapter,
+              target!.verseEnd,
+            ).length,
+          ).toBeGreaterThan(0);
+          expect(
+            getPassage(
+              'cuv-s',
+              target!.bookId,
+              target!.chapter,
+              target!.verseStart ?? 1,
+              target!.chapter,
+              target!.verseEnd,
+            ).length,
+          ).toBeGreaterThan(0);
+          expect(getPassage('b2000', target!.bookId, target!.chapter, 1)).toEqual([]);
         }
   });
 });

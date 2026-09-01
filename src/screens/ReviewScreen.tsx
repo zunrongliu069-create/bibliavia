@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Speech from 'expo-speech';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
@@ -17,9 +18,11 @@ import {
 import { Button, ProgressBar } from '../components/ui';
 import { characterById } from '../data/characters';
 import { chestImageForTier } from '../data/chests';
+import { pathForBook } from '../data/paths';
 import {
   exactSentenceChoice,
   finishSentenceChoice,
+  lessonModes,
   nextVerseChoice,
   recommendedMode,
   understandingChoices,
@@ -27,7 +30,10 @@ import {
   wordChoice,
 } from '../lib/exercise';
 import { inferReviewGrade } from '../lib/adaptiveGrade';
+import { answerWordDiff, mistakeFeedbackKey } from '../lib/answerFeedback';
+import { heroGameplayEffects } from '../lib/characterBonuses';
 import { t } from '../lib/i18n';
+import { uiText } from '../lib/uiText';
 import { learningSequence, nextVerseAfter } from '../lib/learningSequence';
 import { lessonOutcome } from '../lib/lessonOutcome';
 import { chestTierAfterTap, lessonChestTierForStage } from '../lib/rewards';
@@ -64,18 +70,6 @@ type SpeechRecognitionLike = {
   start: () => void;
   stop: () => void;
 };
-const lessonModes: ExerciseMode[] = [
-  'read',
-  'finish',
-  'initials',
-  'choice',
-  'sentenceCheck',
-  'reorder',
-  'match',
-  'contextChoice',
-  'speak',
-  'recall',
-];
 const lessonXp = [4, 5, 11, 3, 3, 5, 4, 3, 5, 7];
 const stageTotals = [20, 35, 50];
 const lessonWorld = require('../../assets/game/scriptora-path-world.png');
@@ -89,10 +83,11 @@ export function ReviewScreen({
 }: {
   initialVerse: Verse;
   reviewVerses?: Verse[];
-  kind: 'lesson' | ReviewMode;
+  kind: 'lesson' | 'challenge' | ReviewMode;
   onClose: () => void;
 }) {
   const store = useAppStore();
+  const u = (text: string) => uiText(store.uiLanguage, text);
   const [lessonVerse, setLessonVerse] = useState(initialVerse);
   const lessonId = lessonVerse.id;
   const resumeIndex =
@@ -103,6 +98,14 @@ export function ReviewScreen({
   const [exerciseIndex, setExerciseIndex] = useState(resumeIndex);
   const [combo, setCombo] = useState(0);
   const [hearts, setHearts] = useState(3);
+  const [guidedHintsUsed, setGuidedHintsUsed] = useState(0);
+  const [mistakeShieldsUsed, setMistakeShieldsUsed] = useState(0);
+  const [comboGuardsUsed, setComboGuardsUsed] = useState(0);
+  const [guidedHintActive, setGuidedHintActive] = useState(false);
+  const heroEffects = useMemo(
+    () => heroGameplayEffects(store.progress),
+    [store.progress.activeCharacters, store.progress.characterShards],
+  );
   const [verse, setVerse] = useState(initialVerse);
   const sequence = useMemo(() => learningSequence(store.availableVerses), [store.availableVerses]);
   const reviewSequence = kind === 'lesson' ? [] : reviewVerses;
@@ -118,7 +121,9 @@ export function ReviewScreen({
   const [mode, setMode] = useState<ExerciseMode>(() =>
     kind === 'lesson'
       ? lessonModes[resumeIndex]!
-      : recommendedMode(store.progress.mastery[initialVerse.id]),
+      : kind === 'challenge'
+        ? 'recall'
+        : recommendedMode(store.progress.mastery[initialVerse.id]),
   );
   const [answer, setAnswer] = useState('');
   const [reorderSelection, setReorderSelection] = useState<number[]>([]);
@@ -129,11 +134,16 @@ export function ReviewScreen({
   const [pairMistakes, setPairMistakes] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [hints, setHints] = useState(0);
+  const visibleHints = hints + (guidedHintActive ? 1 : 0);
   const [accuracy, setAccuracy] = useState(0);
   const [suggestedGrade, setSuggestedGrade] = useState<ReviewGrade>('good');
   const [minorDifferences, setMinorDifferences] = useState(false);
   const [listening, setListening] = useState(false);
+  const [playingAudio, setPlayingAudio] = useState(false);
+  const [xpFeedback, setXpFeedback] = useState<number | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const advancingRef = useRef(false);
   const startedAt = useRef(Date.now());
   const sessionId = useRef(`${kind}-${lessonId}-${Date.now()}`);
   const choice = useMemo(() => wordChoice(verse), [verse]);
@@ -187,9 +197,21 @@ export function ReviewScreen({
             : mode === 'context'
               ? initialPhrase.phrase
               : verse.text;
+  const answerDiff = useMemo(
+    () => answerWordDiff(answerTarget, answer, verse.languageTag),
+    [answerTarget, answer, verse.languageTag],
+  );
   useEffect(() => {
     if (Platform.OS === 'web') globalThis.scrollTo?.(0, 0);
   }, [phase, exerciseIndex]);
+  useEffect(
+    () => () => {
+      Speech.stop();
+      recognitionRef.current?.stop();
+      if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+    },
+    [],
+  );
 
   const labels: Record<ExerciseMode, string> = {
     read: t(store.uiLanguage, 'readMode'),
@@ -254,9 +276,9 @@ export function ReviewScreen({
   const hintText = useMemo(
     () =>
       tokenize(answerTarget, verse.languageTag)
-        .slice(0, Math.min(2 + hints * 2, 6))
+        .slice(0, Math.min(2 + visibleHints * 2, 6))
         .join(verse.languageTag.startsWith('zh') ? '' : ' '),
-    [answerTarget, verse.languageTag, hints],
+    [answerTarget, verse.languageTag, visibleHints],
   );
   const usesTextInput = ![
     'read',
@@ -285,6 +307,7 @@ export function ReviewScreen({
     setPairMistakes(0);
     setRevealed(false);
     setHints(0);
+    setGuidedHintActive(false);
     setAccuracy(0);
     setSuggestedGrade('good');
     setMinorDifferences(false);
@@ -318,6 +341,29 @@ export function ReviewScreen({
     setPendingChestTier(tier);
     setPhase('reward');
   };
+  const recordSessionPath = (scores: number[]) => {
+    const average = scores.length
+      ? scores.reduce((sum, item) => sum + item, 0) / scores.length
+      : 0.7;
+    const activity =
+      kind === 'lesson' ? 'memorization' : kind === 'challenge' ? 'challenge' : 'review';
+    const campaignId =
+      verse.bookId === 'romans' || verse.bookId === 'proverbs' ? verse.bookId : null;
+    const defaultPath = campaignId ? pathForBook(campaignId, 'memorization') : undefined;
+    const focusedPathId = store.progress.focusedPathId;
+    const pathId =
+      focusedPathId && store.progress.activePathIds?.includes(focusedPathId)
+        ? focusedPathId
+        : defaultPath?.id;
+    if (!pathId) return;
+    store.recordPathActivity({
+      pathId,
+      beatId: pathId === defaultPath?.id ? `${verse.bookId}-${verse.chapter}` : undefined,
+      activity,
+      quality: activity === 'challenge' ? 1 + Math.max(0, average - 0.8) * 1.5 : average,
+      success: average >= 0.55,
+    });
+  };
   const nextLessonVerse = nextVerseAfter(sequence, lessonVerse.id);
   const startNextVerse = () => {
     if (!nextLessonVerse) {
@@ -325,13 +371,20 @@ export function ReviewScreen({
       return;
     }
     store.setLessonProgress(nextLessonVerse.id, 0);
-    if (nextLessonVerse.bookId !== lessonVerse.bookId) store.setCampaign(nextLessonVerse.bookId);
+    if (
+      nextLessonVerse.bookId !== lessonVerse.bookId &&
+      (nextLessonVerse.bookId === 'romans' || nextLessonVerse.bookId === 'proverbs')
+    )
+      store.setCampaign(nextLessonVerse.bookId);
     setLessonVerse(nextLessonVerse);
     setVerse(nextLessonVerse);
     setExerciseIndex(0);
     setSessionScores([]);
     setCombo(0);
     setHearts(3);
+    setGuidedHintsUsed(0);
+    setMistakeShieldsUsed(0);
+    setComboGuardsUsed(0);
     sessionId.current = `lesson-${nextLessonVerse.id}-${Date.now()}`;
     resetAttempt('read');
     setPhase('practice');
@@ -339,7 +392,7 @@ export function ReviewScreen({
   const reveal = () => {
     const recallMs = Date.now() - startedAt.current;
     const score =
-      mode === 'read'
+      mode === 'read' || mode === 'listen'
         ? 1
         : mode === 'understand'
           ? understanding.find((item) => item.label === selectedChoice)?.correct
@@ -369,7 +422,7 @@ export function ReviewScreen({
     const isRecallAnswer = usesTextInput;
     setAccuracy(score);
     setSuggestedGrade(
-      mode === 'read'
+      mode === 'read' || mode === 'listen'
         ? 'good'
         : inferReviewGrade({
             accuracy: score,
@@ -382,10 +435,25 @@ export function ReviewScreen({
     setRevealed(true);
   };
   const grade = (gradeValue: ReviewGrade) => {
-    const score = mode === 'read' ? 1 : accuracy;
+    if (advancingRef.current) return;
+    advancingRef.current = true;
+    const score = mode === 'read' || mode === 'listen' ? 1 : accuracy;
     const { success } = lessonOutcome(gradeValue, score);
-    const fixedXp = success ? (kind !== 'lesson' ? 5 : (lessonXp[exerciseIndex] ?? 0)) : 0;
-    store.recordReview({
+    const now = new Date();
+    const alreadyReceivedFailureProgress = store.progress.reviews.some(
+      (review) =>
+        review.verseId === verse.id &&
+        review.grade === 'again' &&
+        new Date(review.reviewedAt).toDateString() === now.toDateString(),
+    );
+    const fixedXp = success
+      ? kind !== 'lesson'
+        ? 5
+        : (lessonXp[exerciseIndex] ?? 0)
+      : alreadyReceivedFailureProgress
+        ? 0
+        : 1;
+    const awardedXp = store.recordReview({
       verse,
       grade: gradeValue,
       mode,
@@ -394,27 +462,101 @@ export function ReviewScreen({
       recallMs: Date.now() - startedAt.current,
       xpOverride: fixedXp,
     });
-    setSessionScores((old) => [...old, score]);
-    setCombo((old) => (success ? old + 1 : 0));
-    if (!success) setHearts((old) => Math.max(0, old - 1));
-    if (kind !== 'lesson') {
-      const nextVerse = reviewSequence[currentIndex + 1];
-      if (!nextVerse) {
-        openCurrentChest(1);
+    setXpFeedback(awardedXp);
+    const nextScores = [...sessionScores, score];
+    setSessionScores(nextScores);
+    const protectsHeart = !success && mistakeShieldsUsed < heroEffects.mistakeShields;
+    const protectsCombo = !success && comboGuardsUsed < heroEffects.comboGuards;
+    if (success) setCombo((old) => old + 1);
+    else if (protectsCombo) setComboGuardsUsed((old) => old + 1);
+    else setCombo(0);
+    if (protectsHeart) setMistakeShieldsUsed((old) => old + 1);
+    store.emitFeedback({
+      type: success ? 'ACTIVITY_CORRECT' : 'ACTIVITY_WRONG',
+      tier: 1,
+      tone: 'reflective',
+      message: success
+        ? u('Correct')
+        : [
+            u('Wrong'),
+            protectsHeart ? u('Hero protected a heart') : '',
+            protectsCombo ? u('Hero kept the combo') : '',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+    });
+    if (!success && !protectsHeart) setHearts((old) => Math.max(0, old - 1));
+    advanceTimerRef.current = setTimeout(() => {
+      setXpFeedback(null);
+      advancingRef.current = false;
+      if (kind !== 'lesson') {
+        const nextVerse = reviewSequence[currentIndex + 1];
+        if (!nextVerse) {
+          recordSessionPath(nextScores);
+          openCurrentChest(1);
+          return;
+        }
+        setVerse(nextVerse);
+        resetAttempt(
+          kind === 'challenge' ? 'recall' : recommendedMode(store.progress.mastery[nextVerse.id]),
+        );
         return;
       }
-      setVerse(nextVerse);
-      resetAttempt(recommendedMode(store.progress.mastery[nextVerse.id]));
+      const nextIndex = exerciseIndex + 1;
+      if (nextIndex >= lessonModes.length) store.completeLesson(lessonId);
+      else store.setLessonProgress(lessonId, nextIndex);
+      setExerciseIndex(nextIndex);
+      if (nextIndex === 3 || nextIndex === 7 || nextIndex === lessonModes.length) {
+        recordSessionPath(nextScores);
+        setPhase('checkpoint');
+        return;
+      }
+      resetAttempt(lessonModes[nextIndex]!);
+    }, 1100);
+  };
+
+  const skipOptionalExercise = () => {
+    Speech.stop();
+    recognitionRef.current?.stop();
+    setPlayingAudio(false);
+    setListening(false);
+    if (kind !== 'lesson') {
+      const nextReviewVerse = reviewSequence[currentIndex + 1];
+      if (!nextReviewVerse) return onClose();
+      setVerse(nextReviewVerse);
+      resetAttempt(
+        kind === 'challenge'
+          ? 'recall'
+          : recommendedMode(store.progress.mastery[nextReviewVerse.id]),
+      );
       return;
     }
     const nextIndex = exerciseIndex + 1;
-    store.setLessonProgress(lessonId, nextIndex >= 10 ? 0 : nextIndex);
+    if (nextIndex >= lessonModes.length) store.completeLesson(lessonId);
+    else store.setLessonProgress(lessonId, nextIndex);
     setExerciseIndex(nextIndex);
-    if (nextIndex === 3 || nextIndex === 7 || nextIndex === 10) {
+    if (nextIndex === 3 || nextIndex === 7 || nextIndex === lessonModes.length) {
+      recordSessionPath(sessionScores);
       setPhase('checkpoint');
       return;
     }
     resetAttempt(lessonModes[nextIndex]!);
+  };
+
+  const playVerse = () => {
+    if (playingAudio) {
+      Speech.stop();
+      setPlayingAudio(false);
+      return;
+    }
+    Speech.speak(verse.text, {
+      language: verse.languageTag,
+      rate: 0.82,
+      onStart: () => setPlayingAudio(true),
+      onDone: () => setPlayingAudio(false),
+      onStopped: () => setPlayingAudio(false),
+      onError: () => setPlayingAudio(false),
+    });
   };
 
   const startSpeech = () => {
@@ -424,7 +566,7 @@ export function ReviewScreen({
     };
     const Constructor = root.SpeechRecognition ?? root.webkitSpeechRecognition;
     if (!Constructor) {
-      setAnswer('Speech recognition is not available in this browser.');
+      setAnswer(u('Speech recognition is not available on this device.'));
       return;
     }
     const recognition = new Constructor();
@@ -502,6 +644,15 @@ export function ReviewScreen({
         imageStyle={styles.adventureImage}
       >
         <View style={styles.adventureScrim} />
+        {xpFeedback !== null && (
+          <View pointerEvents="none" accessibilityLiveRegion="assertive" style={styles.xpFeedback}>
+            <Ionicons name="star" size={22} color="#2A1455" />
+            <Text style={styles.xpFeedbackText}>
+              {xpFeedback > 0 ? '+' : ''}
+              {xpFeedback} XP
+            </Text>
+          </View>
+        )}
         <View style={styles.header}>
           <Pressable
             accessibilityRole="button"
@@ -551,7 +702,7 @@ export function ReviewScreen({
             </View>
             <View style={styles.referenceRow}>
               <Text style={styles.referenceEyebrow}>{verse.reference.toUpperCase()}</Text>
-              <Text style={styles.stage}>{mastery?.stage ?? 'new'}</Text>
+              <Text style={styles.stage}>{u(mastery?.stage ?? 'new')}</Text>
             </View>
             <View style={styles.masteryRow}>
               <Strength
@@ -573,13 +724,16 @@ export function ReviewScreen({
             </Text>
             {mode === 'speak' && (
               <Button
-                label={
-                  listening
-                    ? t(store.uiLanguage, 'stopListening')
-                    : t(store.uiLanguage, 'startListening')
-                }
+                label={u(listening ? 'Stop speaking' : 'Start speaking')}
                 variant="secondary"
                 onPress={() => (listening ? recognitionRef.current?.stop() : startSpeech())}
+              />
+            )}
+            {mode === 'listen' && (
+              <Button
+                label={u(playingAudio ? 'Stop audio' : 'Play verse')}
+                variant="secondary"
+                onPress={playVerse}
               />
             )}
             {mode === 'understand' && (
@@ -733,10 +887,10 @@ export function ReviewScreen({
                 placeholderTextColor={colors.muted}
                 style={[styles.input, verse.languageTag.startsWith('zh') && styles.chinese]}
                 autoCorrect={false}
-                accessibilityLabel="Your recalled verse"
+                accessibilityLabel={u('Your recalled verse')}
               />
             )}
-            {hints > 0 && !revealed && (
+            {visibleHints > 0 && !revealed && (
               <View style={styles.hint}>
                 <Ionicons name="bulb" color={colors.gold} size={19} />
                 <Text style={styles.hintText}>{hintText}…</Text>
@@ -744,16 +898,36 @@ export function ReviewScreen({
             )}
             {!revealed ? (
               <View style={styles.actions}>
+                {(mode === 'listen' || mode === 'speak') && (
+                  <Button
+                    label={u('Skip exercise')}
+                    variant="ghost"
+                    onPress={skipOptionalExercise}
+                  />
+                )}
                 {mode !== 'read' && !(kind === 'lesson' && exerciseIndex >= 7) && (
                   <Button
                     label={t(store.uiLanguage, 'showHint')}
                     variant="secondary"
-                    onPress={() => setHints((old) => old + 1)}
+                    onPress={() => {
+                      if (guidedHintsUsed < heroEffects.guidedHints) {
+                        setGuidedHintsUsed((old) => old + 1);
+                        setGuidedHintActive(true);
+                        store.emitFeedback({
+                          type: 'ACTIVITY_PARTIAL',
+                          tier: 1,
+                          tone: 'reflective',
+                          message: u('Hero revealed a guided hint'),
+                        });
+                      } else setHints((old) => old + 1);
+                    }}
                   />
                 )}
                 <Button
                   label={
-                    mode === 'read' ? t(store.uiLanguage, 'continue') : t(store.uiLanguage, 'check')
+                    mode === 'read' || mode === 'listen'
+                      ? t(store.uiLanguage, 'continue')
+                      : t(store.uiLanguage, 'check')
                   }
                   onPress={reveal}
                 />
@@ -817,6 +991,50 @@ export function ReviewScreen({
                   </Text>
                 </View>
                 {mode !== 'read' && (
+                  <Text style={styles.mistakeFeedback}>
+                    {t(store.uiLanguage, mistakeFeedbackKey(mode, accuracy, answerDiff))}
+                  </Text>
+                )}
+                {usesTextInput && answerDiff.tokens.length > 0 && (
+                  <View style={styles.wordDiff} accessibilityRole="text">
+                    {answerDiff.tokens.map((token, index) => {
+                      const symbol =
+                        token.kind === 'correct'
+                          ? '✓'
+                          : token.kind === 'minor'
+                            ? '~'
+                            : token.kind === 'missing'
+                              ? '−'
+                              : token.kind === 'extra'
+                                ? '+'
+                                : '↔';
+                      const text =
+                        token.kind === 'changed'
+                          ? `${token.actual} → ${token.expected}`
+                          : token.kind === 'missing'
+                            ? token.expected
+                            : token.actual;
+                      return (
+                        <Text
+                          key={`${index}-${token.kind}-${text}`}
+                          style={[
+                            styles.diffToken,
+                            token.kind === 'correct'
+                              ? styles.diffCorrect
+                              : token.kind === 'minor'
+                                ? styles.diffMinor
+                                : token.kind === 'extra'
+                                  ? styles.diffExtra
+                                  : styles.diffWrong,
+                          ]}
+                        >
+                          {symbol} {text}
+                        </Text>
+                      );
+                    })}
+                  </View>
+                )}
+                {mode !== 'read' && (
                   <Text
                     selectable
                     style={[
@@ -831,11 +1049,13 @@ export function ReviewScreen({
                 )}
                 <Button
                   label={`${t(store.uiLanguage, 'continue')} · ${t(store.uiLanguage, suggestedGrade)}`}
+                  disabled={xpFeedback !== null}
                   onPress={() => grade(suggestedGrade)}
                 />
                 <Text style={styles.gradeHint}>{t(store.uiLanguage, 'adaptiveAssessment')}</Text>
                 <View style={styles.grades}>
                   <Grade
+                    language={store.uiLanguage}
                     icon="refresh"
                     label={t(store.uiLanguage, 'again')}
                     color={colors.coral}
@@ -843,6 +1063,7 @@ export function ReviewScreen({
                     onPress={() => grade('again')}
                   />
                   <Grade
+                    language={store.uiLanguage}
                     icon="analytics"
                     label={t(store.uiLanguage, 'hard')}
                     color={colors.gold}
@@ -850,6 +1071,7 @@ export function ReviewScreen({
                     onPress={() => grade('hard')}
                   />
                   <Grade
+                    language={store.uiLanguage}
                     icon="checkmark"
                     label={t(store.uiLanguage, 'good')}
                     color={colors.mint}
@@ -857,6 +1079,7 @@ export function ReviewScreen({
                     onPress={() => grade('good')}
                   />
                   <Grade
+                    language={store.uiLanguage}
                     icon="flash"
                     label={t(store.uiLanguage, 'easy')}
                     color={colors.primary}
@@ -918,7 +1141,7 @@ function LessonIntro({
     <AdventureShell>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Close lesson introduction"
+        accessibilityLabel={uiText(language, 'Close lesson introduction')}
         onPress={onClose}
         style={styles.introClose}
       >
@@ -1039,7 +1262,7 @@ function StageCheckpoint({
   );
 }
 
-function ChestRewardScreen({
+export function ChestRewardScreen({
   language,
   baseTier,
   seed,
@@ -1063,23 +1286,27 @@ function ChestRewardScreen({
   const [reward, setReward] = useState<ChestReward | null>(null);
   const [tapMessage, setTapMessage] = useState('');
   const chestSpin = useRef(new Animated.Value(0)).current;
+  const spinning = useRef(false);
   const average = scores.length ? scores.reduce((sum, item) => sum + item, 0) / scores.length : 0;
   const tapChest = () => {
-    if (reward) return;
+    if (reward || spinning.current || taps >= 3) return;
+    spinning.current = true;
     chestSpin.stopAnimation();
     chestSpin.setValue(0);
+    const nextTap = taps + 1;
+    const nextTier = chestTierAfterTap(seed, nextTap, tier, average);
     Animated.timing(chestSpin, {
       toValue: 1,
       duration: 520,
       easing: Easing.out(Easing.back(1.35)),
       useNativeDriver: true,
-    }).start();
-    const nextTap = taps + 1;
-    const nextTier = chestTierAfterTap(seed, nextTap, tier, average);
+    }).start(() => {
+      spinning.current = false;
+      if (nextTap === 3) setReward(onReveal(nextTier));
+    });
     setTaps(nextTap);
     setTier(nextTier);
     setTapMessage(nextTier > tier ? t(language, 'chestUpgraded') : t(language, 'chestStayed'));
-    if (nextTap === 3) setTimeout(() => setReward(onReveal(nextTier)), 480);
   };
   const animatedChestStyle = {
     transform: [
@@ -1148,7 +1375,7 @@ function ChestRewardScreen({
         {reward.rewards.map((loot, index) => (
           <View key={`${loot.type}-${index}`} style={styles.lootReward}>
             <Text style={styles.lootRewardText}>{lootLabel(loot, language)}</Text>
-            {index > 0 && <Text style={styles.bonusBadge}>BONUS</Text>}
+            {index > 0 && <Text style={styles.bonusBadge}>{uiText(language, 'BONUS')}</Text>}
           </View>
         ))}
       </View>
@@ -1169,10 +1396,11 @@ function ChestRewardScreen({
 
 function lootLabel(loot: ChestLoot, language: UiLanguage): string {
   if (loot.type === 'gold') return `🪙 +${loot.amount} ${t(language, 'gold')}`;
-  if (loot.type === 'wildShards') return `🃏 +${loot.amount} Wild Shards`;
-  if (loot.type === 'streakFreeze') return `🛡️ +${loot.amount} Streak Freeze`;
+  if (loot.type === 'wildShards') return `🃏 +${loot.amount} ${uiText(language, 'Wild Shards')}`;
+  if (loot.type === 'streakFreeze')
+    return `🛡️ +${loot.amount} ${uiText(language, 'Streak Freeze')}`;
   if (loot.type === 'xpBooster' || loot.type === 'goldBooster')
-    return `${loot.type === 'xpBooster' ? '⚡' : '🪙'} 2× ${loot.type === 'xpBooster' ? 'XP' : 'Gold'} · ${loot.durationMinutes} min`;
+    return `${loot.type === 'xpBooster' ? '⚡' : '🪙'} 2× ${loot.type === 'xpBooster' ? 'XP' : uiText(language, 'Gold')} · ${loot.durationMinutes} min`;
   if (loot.type === 'characterShards')
     return loot.characters
       .map((item) => `🧩 ${characterById(item.characterId).names[language]} +${item.amount}`)
@@ -1216,12 +1444,14 @@ function Strength({ label, value, color }: { label: string; value: number; color
   );
 }
 function Grade({
+  language,
   icon,
   label,
   color,
   recommended,
   onPress,
 }: {
+  language: UiLanguage;
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   color: string;
@@ -1232,7 +1462,7 @@ function Grade({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint={recommended ? 'Recommended assessment' : undefined}
+      accessibilityHint={recommended ? uiText(language, 'Recommended assessment') : undefined}
       onPress={onPress}
       style={[styles.grade, recommended && { borderColor: color, backgroundColor: `${color}12` }]}
     >
@@ -1257,6 +1487,27 @@ const styles = StyleSheet.create({
     left: 0,
     backgroundColor: 'rgba(19,12,38,.42)',
   },
+  xpFeedback: {
+    position: 'absolute',
+    top: 78,
+    alignSelf: 'center',
+    zIndex: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 22,
+    backgroundColor: '#F8DA78',
+    borderWidth: 2,
+    borderColor: '#FFF3B8',
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  xpFeedbackText: { color: '#2A1455', fontSize: 20, fontWeight: '900' },
   header: {
     height: 68,
     paddingHorizontal: 18,
@@ -1434,6 +1685,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFFB8',
   },
   acceptanceText: { flex: 1, fontSize: 13, fontWeight: '800', color: colors.inkSoft },
+  mistakeFeedback: { fontSize: 13, lineHeight: 19, fontWeight: '700', color: colors.inkSoft },
+  wordDiff: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  diffToken: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 4, fontSize: 12 },
+  diffCorrect: { color: '#225C47', backgroundColor: '#DFF5E9' },
+  diffMinor: { color: '#72540B', backgroundColor: '#FFF0BD' },
+  diffWrong: { color: '#843B35', backgroundColor: '#FFE0DC' },
+  diffExtra: { color: '#554282', backgroundColor: '#EDE6FF' },
   answerText: { fontSize: 16, lineHeight: 26, color: colors.inkSoft },
   gradeHint: { fontSize: 11, fontWeight: '800', color: colors.muted, textAlign: 'center' },
   grades: { flexDirection: 'row', justifyContent: 'space-between', gap: 5 },

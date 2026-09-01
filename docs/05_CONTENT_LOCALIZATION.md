@@ -43,7 +43,7 @@ Every import must provide:
   "attribution": "Source: eBible.org, cmn-cu89s",
   "sourceUrl": "https://ebible.org/find/details.php?id=cmn-cu89s",
   "sourceChecksum": "required-at-import",
-  "verifiedAt": "2026-08-23",
+  "verifiedAt": "2026-08-31",
   "permissionExpiresAt": null,
   "publicBuild": true
 }
@@ -83,11 +83,13 @@ Sources: [Simplified CUV source](https://ebible.org/find/details.php?id=cmn-cu89
 
 ### World English Bible
 
-The bundled English starter verses use the World English Bible protocanon edition, which eBible.org explicitly marks public domain. Each verse retains its exact source URL. Source: [World English Bible record](https://ebible.org/details.php?id=engwebp).
+The bundled English content is the complete 66-book World English Bible protocanon edition, which eBible.org explicitly marks public domain. Its exact VPL source checksum and edition URL are retained. Source: [World English Bible record](https://ebible.org/bible/details.php?id=engwebp).
 
-## Adding full Romans and Proverbs
+## Current full imports and adding another version
 
-1. Acquire the approved USFM/USX source directly from the recorded provider.
+WEB, Simplified CUV and Traditional CUV are imported as complete 66-book local content packages. Reading, Memorization, Review, Challenge and Paths query these packages through the same `getVerse`/`getPassage` API. B2000 has metadata only and is disabled.
+
+1. Acquire the approved VPL/USFM/USX source directly from the recorded provider.
 2. Store raw files outside the app repository in access-controlled content storage.
 3. Run the importer into a versioned content database/package.
 4. Produce checksums, validation report, verse-count report, token package, manifest, and attribution artifact.

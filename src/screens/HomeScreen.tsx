@@ -1,13 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Card, Eyebrow, ProgressBar } from '../components/ui';
+import { Button, Card, Eyebrow, ProgressBar } from '../components/ui';
 import { characterById, characters, rarityColors } from '../data/characters';
+import { getReferencedPassage } from '../data/content';
+import { biblePeriods, highestUnlockedPeriodForLevel } from '../data/periods';
+import { beatTitle, pathDefinitions, pathTitle } from '../data/paths';
+import { readingPlanById } from '../data/readingPlans';
 import { achievementsFor } from '../lib/achievements';
+import {
+  ACHIEVEMENT_REWARDS,
+  DAILY_GOAL_REWARD,
+  DAILY_GOAL_XP,
+  DAILY_QUEST_REWARD,
+  activityDay,
+} from '../lib/activityRewards';
 import { t } from '../lib/i18n';
+import { uiText } from '../lib/uiText';
 import { levelProgressForXp, levelRewardFor, titleTierForLevel } from '../lib/level';
 import { learningSequence } from '../lib/learningSequence';
 import { masteryPercent, recallRisk, retrievability } from '../lib/scheduler';
+import { nextPathBeat, pathProgressRatio } from '../lib/pathProgress';
+import { nextPathAction, pathResumeSummary } from '../lib/pathGuidance';
 import { prioritizedDueVerses, reviewHealth, type ReviewMode } from '../lib/reviewQueue';
 import { colors, radius } from '../theme';
 import type { Verse } from '../types';
@@ -17,18 +31,44 @@ export function HomeScreen({
   onStart,
   onReview,
   onOpenCollection,
+  onOpenVerses,
+  onOpenPaths,
 }: {
   onStart: (verse: Verse) => void;
   onReview: (mode: ReviewMode) => void;
   onOpenCollection: () => void;
+  onOpenVerses: () => void;
+  onOpenPaths: () => void;
 }) {
   const store = useAppStore();
+  const [showMore, setShowMore] = useState(false);
+  const u = (text: string) => uiText(store.uiLanguage, text);
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
+  const today = activityDay(now);
   const campaignVerses = store.availableVerses.filter(
     (verse) => verse.bookId === store.progress.activeCampaign,
   );
   const orderedVerses = learningSequence(store.availableVerses);
+  const allPaths = [...pathDefinitions, ...(store.progress.customPaths ?? [])];
+  const homePaths = (store.progress.activePathIds ?? [])
+    .map((id) => allPaths.find((path) => path.id === id))
+    .filter((path): path is NonNullable<typeof path> => Boolean(path))
+    .slice(0, 3);
+  const focusedPath =
+    allPaths.find((path) => path.id === store.progress.focusedPathId) ?? homePaths[0];
+  const focusedBeat = focusedPath
+    ? nextPathBeat(focusedPath, store.progress.pathStates?.[focusedPath.id])
+    : undefined;
+  const focusedPathState = focusedPath ? store.progress.pathStates?.[focusedPath.id] : undefined;
+  const focusedAction = focusedPath
+    ? nextPathAction(focusedPath, focusedPathState, store.uiLanguage)
+    : undefined;
+  const focusedReference =
+    focusedBeat?.passage ?? focusedBeat?.passages?.[0] ?? focusedPath?.passage;
+  const focusedVerses =
+    focusedPath && focusedReference
+      ? getReferencedPassage(focusedPath.bibleVersionId ?? store.translationId, focusedReference)
+      : [];
   const due = prioritizedDueVerses(
     orderedVerses,
     store.progress.mastery,
@@ -37,15 +77,17 @@ export function HomeScreen({
     now,
   );
   const health = reviewHealth(orderedVerses, store.progress.mastery, now);
-  const firstNew = orderedVerses.find(
-    (verse) => (store.progress.mastery[verse.id]?.successfulRecalls ?? 0) === 0,
+  const firstNew = (focusedVerses.length ? focusedVerses : orderedVerses).find(
+    (verse) =>
+      !store.progress.completedLessonIds.includes(verse.id) &&
+      (store.progress.mastery[verse.id]?.successfulRecalls ?? 0) === 0,
   );
   const next = due[0] ?? firstNew ?? orderedVerses[0];
-  const reviewsToday = store.progress.reviews.filter((review) =>
-    review.reviewedAt.startsWith(today),
+  const reviewsToday = store.progress.reviews.filter(
+    (review) => activityDay(new Date(review.reviewedAt)) === today,
   );
-  const dailyXp = reviewsToday.reduce((sum, review) => sum + review.xpAwarded, 0);
-  const dailyGoal = 50;
+  const dailyXp = store.progress.dailyXp[today] ?? 0;
+  const dailyGoal = DAILY_GOAL_XP;
   const perfectToday = reviewsToday.some(
     (review) =>
       review.accuracy >= 0.98 &&
@@ -56,6 +98,16 @@ export function HomeScreen({
     (review) => store.progress.mastery[review.verseId]?.successfulRecalls === 1,
   );
   const questDone = [reviewsToday.length >= 3, perfectToday, learnedToday].filter(Boolean).length;
+  const todayComplete = dailyXp >= dailyGoal && questDone === 3;
+  const dailyFocus =
+    reviewsToday.length < 3
+      ? {
+          label: t(store.uiLanguage, 'questReview'),
+          action: () => (due.length ? onReview('quick') : next && onStart(next)),
+        }
+      : !perfectToday
+        ? { label: t(store.uiLanguage, 'questPerfect'), action: () => next && onStart(next) }
+        : { label: t(store.uiLanguage, 'questNew'), action: () => next && onStart(next) };
   const atRisk = useMemo(
     () =>
       store.availableVerses
@@ -68,6 +120,13 @@ export function HomeScreen({
   );
   const levelState = levelProgressForXp(store.progress.xp);
   const level = levelState.level;
+  const currentPeriod = biblePeriods[highestUnlockedPeriodForLevel(level) - 1]!;
+  const activePlan = store.progress.activeReadingPlanId
+    ? readingPlanById(store.progress.activeReadingPlanId)
+    : undefined;
+  const activePlanProgress = activePlan
+    ? store.progress.readingPlanProgress[activePlan.id]
+    : undefined;
   const titleKey = (
     {
       1: 'levelTitleBeginner',
@@ -117,6 +176,7 @@ export function HomeScreen({
           (store.progress.mastery[a.id]?.recallStrength ?? 0)),
     )[0];
   const coachVerse = due[0] ?? recallGap ?? firstNew ?? next;
+  const continueVerse = firstNew ?? due[0] ?? recallGap ?? orderedVerses[0];
   const coachMessage = due.length
     ? t(store.uiLanguage, 'coachDue')
     : recallGap
@@ -135,18 +195,153 @@ export function HomeScreen({
     store.availableVerses,
     Object.fromEntries(characters.map((item) => [item.id, item.unlockCost])),
   );
-
   return (
     <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}>
       <View style={styles.heroTop}>
         <View>
-          <Text style={styles.logo}>SCRIPTORA</Text>
+          <Text style={styles.logo}>BIBLIAVIA</Text>
           <Text style={styles.greeting}>{t(store.uiLanguage, 'greeting')}</Text>
         </View>
         <View style={styles.avatar}>
           <Ionicons name="sparkles" size={22} color="#F2CB65" />
         </View>
       </View>
+
+      <View style={styles.todayActions}>
+        <View style={styles.todayActionColumn}>
+          <Text style={styles.homeSectionLabel}>{u('CONTINUE TODAY')}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              focusedPath && focusedAction
+                ? `${focusedAction.label}: ${focusedAction.detail}`
+                : todayComplete
+                  ? u("Today's goals complete")
+                  : `Continue ${continueVerse?.reference ?? ''}`
+            }
+            disabled={!focusedPath && !continueVerse}
+            onPress={() => {
+              if (focusedPath) {
+                store.focusPath(focusedPath.id);
+                onOpenPaths();
+              } else if (continueVerse) onStart(continueVerse);
+            }}
+            style={({ pressed }) => [styles.continueToday, pressed && { opacity: 0.86 }]}
+          >
+            <View style={styles.continueIcon}>
+              <Ionicons name={todayComplete ? 'checkmark' : 'play'} size={21} color="#2B1748" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.continueTitle} numberOfLines={1}>
+                {focusedPath && focusedAction
+                  ? `${focusedAction.label}: ${focusedAction.detail}`
+                  : todayComplete
+                    ? u("Today's goals complete")
+                    : (continueVerse?.reference ?? u('Choose a verse'))}
+              </Text>
+              <Text style={styles.continueSub} numberOfLines={2}>
+                {focusedPath
+                  ? `${pathTitle(focusedPath, store.uiLanguage)} · ${pathResumeSummary(focusedPath, focusedPathState, store.uiLanguage)}`
+                  : todayComplete
+                    ? `${u('Continue optionally with')} ${continueVerse?.reference ?? ''}`
+                    : u('Continue your next focused activity')}
+              </Text>
+            </View>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={u("Read today's passage")}
+            onPress={onOpenVerses}
+            style={({ pressed }) => [styles.readToday, pressed && { opacity: 0.86 }]}
+          >
+            <View style={styles.readTodayIcon}>
+              <Ionicons name="book-outline" size={19} color={colors.primary} />
+            </View>
+            <Text style={styles.readTodayTitle} numberOfLines={2}>
+              {u("Read today's passage")}
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.todayActionColumn}>
+          <Text style={styles.homeSectionLabel}>{u('QUICK ACTIONS')}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t(store.uiLanguage, 'quickPractice')}
+            style={styles.quick}
+            onPress={() => due.length && onReview('quick')}
+            disabled={!due.length}
+          >
+            <View style={styles.quickIcon}>
+              <Ionicons name="flash" size={20} color={colors.gold} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.quickTitle}>{t(store.uiLanguage, 'quickPractice')}</Text>
+              <Text style={styles.quickSub}>{t(store.uiLanguage, 'reviewFive')}</Text>
+            </View>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t(store.uiLanguage, 'fullReview')}
+            style={styles.quick}
+            onPress={() => due.length && onReview('full')}
+            disabled={!due.length}
+          >
+            <View style={styles.quickIcon}>
+              <Ionicons name="albums" size={20} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.quickTitle}>{t(store.uiLanguage, 'fullReview')}</Text>
+              <Text style={styles.quickSub}>
+                {due.length} {t(store.uiLanguage, 'dueReview')}
+              </Text>
+            </View>
+          </Pressable>
+        </View>
+      </View>
+
+      {homePaths.length > 0 && (
+        <View style={styles.homePaths}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.homeSectionLabel}>{u('YOUR NEXT STEPS')}</Text>
+            <Pressable accessibilityRole="button" onPress={onOpenPaths}>
+              <Text style={styles.pathsLink}>{u('View Paths')} →</Text>
+            </Pressable>
+          </View>
+          {homePaths.map((path) => {
+            const state = store.progress.pathStates?.[path.id];
+            return (
+              <Pressable
+                key={path.id}
+                accessibilityRole="button"
+                accessibilityLabel={`${pathTitle(path, store.uiLanguage)}. ${Math.round(pathProgressRatio(path, state) * 100)}%`}
+                onPress={onOpenPaths}
+                style={styles.homePathCard}
+              >
+                <View style={styles.homePathIcon}>
+                  <Ionicons name="navigate" size={18} color={colors.white} />
+                </View>
+                <View style={styles.homePathCopy}>
+                  <Text numberOfLines={1} style={styles.homePathTitle}>
+                    {pathTitle(path, store.uiLanguage)}
+                  </Text>
+                  <Text numberOfLines={1} style={styles.homePathDetail}>
+                    {(nextPathBeat(path, state) &&
+                      beatTitle(nextPathBeat(path, state)!, store.uiLanguage)) ??
+                      u('Path complete')}
+                  </Text>
+                  <ProgressBar value={pathProgressRatio(path, state)} color={colors.gold} />
+                </View>
+                <Text style={styles.homePathPercent}>
+                  {Math.round(pathProgressRatio(path, state) * 100)}%
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+
+      <Text style={styles.homeSectionLabel}>{u("TODAY'S PROGRESS")}</Text>
       <Card style={styles.levelCard}>
         <View style={styles.rowBetween}>
           <View>
@@ -186,6 +381,7 @@ export function HomeScreen({
                   : ''}
                 {levelReward.wildShards ? `  ·  🃏 +${levelReward.wildShards}` : ''}
                 {levelReward.streakFreezes ? `  ·  🛡️ +${levelReward.streakFreezes}` : ''}
+                {unclaimedLevel % 60 === 0 ? `  ·  ◆ +1 ${u('Fragment')}` : ''}
               </Text>
             </View>
             <Pressable
@@ -198,265 +394,351 @@ export function HomeScreen({
             </Pressable>
           </View>
         )}
-      </Card>
-
-      <Card style={styles.dailyCard}>
-        <View style={styles.rowBetween}>
-          <View>
-            <Eyebrow>{t(store.uiLanguage, 'dailyGoal').toUpperCase()}</Eyebrow>
-            <Text style={styles.dailyValue}>
+        <View style={styles.progressDivider} />
+        <View style={styles.compactProgressRow}>
+          <View style={styles.compactProgressCopy}>
+            <Text style={styles.compactProgressTitle}>
+              {t(store.uiLanguage, 'dailyGoal').toUpperCase()}
+            </Text>
+            <Text style={styles.compactProgressValue}>
               {Math.min(dailyXp, dailyGoal)} / {dailyGoal} XP
             </Text>
           </View>
-          <View style={styles.goalIcon}>
-            <Ionicons
-              name={dailyXp >= dailyGoal ? 'checkmark' : 'flag'}
-              size={23}
-              color={dailyXp >= dailyGoal ? colors.white : colors.primary}
+          <View style={styles.compactBar}>
+            <ProgressBar
+              value={dailyXp / dailyGoal}
+              color={dailyXp >= dailyGoal ? colors.mint : colors.gold}
             />
           </View>
-        </View>
-        <ProgressBar
-          value={dailyXp / dailyGoal}
-          color={dailyXp >= dailyGoal ? colors.mint : colors.gold}
-        />
-        <Text style={styles.dailyHint}>
-          {Math.max(0, dailyGoal - dailyXp)} {t(store.uiLanguage, 'xpRemaining')}
-        </Text>
-      </Card>
-
-      <View style={styles.activityRow}>
-        <MiniStat
-          value={store.progress.activeDates.length}
-          label={t(store.uiLanguage, 'daysActive')}
-        />
-        <MiniStat value={store.progress.streak} label={t(store.uiLanguage, 'currentStreak')} />
-        <MiniStat value={store.progress.longestStreak} label={t(store.uiLanguage, 'bestStreak')} />
-      </View>
-
-      <Card style={styles.questCard}>
-        <View style={styles.rowBetween}>
-          <Eyebrow>{t(store.uiLanguage, 'todaysQuest')}</Eyebrow>
-          <Text style={styles.questCount}>{questDone}/3</Text>
-        </View>
-        <ProgressBar value={questDone / 3} color={colors.mint} />
-        <View style={styles.questList}>
-          <Quest done={reviewsToday.length >= 3} label={t(store.uiLanguage, 'questReview')} />
-          <Quest done={perfectToday} label={t(store.uiLanguage, 'questPerfect')} />
-          <Quest done={learnedToday} label={t(store.uiLanguage, 'questNew')} />
-        </View>
-      </Card>
-
-      <Card style={styles.coachCard}>
-        <View style={styles.coachTop}>
-          <View style={styles.coachIcon}>
-            <Ionicons name="compass" size={25} color={colors.white} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Eyebrow>{t(store.uiLanguage, 'memoryCoach').toUpperCase()}</Eyebrow>
-            <Text style={styles.coachTitle}>{t(store.uiLanguage, 'coachReady')}</Text>
-          </View>
-        </View>
-        <Text style={styles.coachMessage}>{coachMessage}</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={coachVerse?.reference}
-          disabled={!coachVerse}
-          onPress={() => coachVerse && onStart(coachVerse)}
-          style={styles.coachAction}
-        >
-          <Text style={styles.coachReference}>{coachVerse?.reference}</Text>
-          <Ionicons name="arrow-forward-circle" size={26} color={colors.primary} />
-        </Pressable>
-        <View style={styles.radar}>
-          <RadarStat
-            icon="time"
-            value={dueSoon}
-            label={t(store.uiLanguage, 'dueSoon')}
-            color={colors.gold}
-          />
-          <RadarStat
-            icon="warning"
-            value={mistakeCount}
-            label={t(store.uiLanguage, 'weakWords')}
-            color={colors.coral}
-          />
-          <RadarStat
-            icon="shield-checkmark"
-            value={strongCount}
-            label={t(store.uiLanguage, 'strongVerses')}
-            color={colors.mint}
+          <Ionicons
+            name={dailyXp >= dailyGoal ? 'checkmark-circle' : 'flag-outline'}
+            size={20}
+            color={dailyXp >= dailyGoal ? colors.mint : colors.gold}
           />
         </View>
+        <View style={styles.compactProgressRow}>
+          <View style={styles.compactProgressCopy}>
+            <Text style={styles.compactProgressTitle}>{t(store.uiLanguage, 'todaysQuest')}</Text>
+            <Text style={styles.compactProgressValue}>{questDone}/3</Text>
+          </View>
+          <View style={styles.compactBar}>
+            <ProgressBar value={questDone / 3} color={colors.mint} />
+          </View>
+          <Ionicons
+            name={questDone === 3 ? 'checkmark-circle' : 'list-outline'}
+            size={20}
+            color={questDone === 3 ? colors.mint : colors.primary}
+          />
+        </View>
+        {dailyXp >= dailyGoal && !store.progress.claimedDailyGoals.includes(today) && (
+          <Button
+            label={`${t(store.uiLanguage, 'claimReward')} · 🪙 ${DAILY_GOAL_REWARD.gold}`}
+            variant="secondary"
+            onPress={store.claimDailyGoalReward}
+          />
+        )}
+        {questDone === 3 && !store.progress.claimedDailyQuests.includes(today) && (
+          <Button
+            label={`${t(store.uiLanguage, 'claimReward')} · 🪙 ${DAILY_QUEST_REWARD.gold}`}
+            variant="secondary"
+            onPress={store.claimDailyQuestReward}
+          />
+        )}
       </Card>
-
-      <View style={styles.reviewHealth}>
-        <View style={styles.rowBetween}>
-          <Eyebrow>{t(store.uiLanguage, 'reviewHealth').toUpperCase()}</Eyebrow>
-          <Text style={styles.reviewHealthValue}>{health}%</Text>
-        </View>
-        <ProgressBar
-          value={health / 100}
-          color={health >= 80 ? colors.mint : health >= 50 ? colors.gold : colors.coral}
-        />
-      </View>
-      <Pressable
-        style={({ pressed }) => [
-          styles.startCard,
-          pressed && { opacity: 0.9 },
-          !due.length && { opacity: 0.55 },
-        ]}
-        onPress={() => due.length && onReview('normal')}
-        disabled={!due.length}
-        accessibilityRole="button"
-      >
-        <View style={styles.startIcon}>
-          <Ionicons name="play" size={24} color={colors.primary} />
-        </View>
-        <View style={styles.startCopy}>
-          <Eyebrow>
-            {due.length
-              ? `${due.length} ${t(store.uiLanguage, 'dueReview')}`
-              : t(store.uiLanguage, 'noDue')}
-          </Eyebrow>
-          <Text style={styles.startTitle}>{t(store.uiLanguage, 'normalReview')}</Text>
-          <Text style={styles.startSub}>{due[0]?.reference ?? t(store.uiLanguage, 'noDue')}</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={26} color={colors.white} />
-      </Pressable>
-      <View style={styles.reviewModes}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t(store.uiLanguage, 'quickPractice')}
-          style={styles.quick}
-          onPress={() => due.length && onReview('quick')}
-          disabled={!due.length}
-        >
-          <View style={styles.quickIcon}>
-            <Ionicons name="flash" size={22} color={colors.gold} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.quickTitle}>{t(store.uiLanguage, 'quickPractice')}</Text>
-            <Text style={styles.quickSub}>{t(store.uiLanguage, 'reviewFive')}</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={22} color={colors.primary} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t(store.uiLanguage, 'fullReview')}
-          style={styles.quick}
-          onPress={() => due.length && onReview('full')}
-          disabled={!due.length}
-        >
-          <View style={styles.quickIcon}>
-            <Ionicons name="albums" size={22} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.quickTitle}>{t(store.uiLanguage, 'fullReview')}</Text>
-            <Text style={styles.quickSub}>
-              {due.length} {t(store.uiLanguage, 'dueReview')}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={22} color={colors.primary} />
-        </Pressable>
-      </View>
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={t(store.uiLanguage, 'collection')}
-        onPress={onOpenCollection}
-        style={({ pressed }) => [styles.collectionCard, pressed && { opacity: 0.88 }]}
+        onPress={() => setShowMore((value) => !value)}
+        style={styles.moreButton}
       >
-        <View style={styles.collectionTop}>
-          <Image
-            source={targetCharacter.image}
-            style={[styles.targetPortrait, { borderColor: rarityColors[targetCharacter.rarity] }]}
-          />
-          <View style={styles.collectionCopy}>
-            <Eyebrow>{t(store.uiLanguage, 'collection').toUpperCase()}</Eyebrow>
-            <Text style={styles.collectionTitle}>{targetCharacter.names[store.uiLanguage]}</Text>
-            <Text style={[styles.targetRarity, { color: rarityColors[targetCharacter.rarity] }]}>
-              {t(store.uiLanguage, targetCharacter.rarity).toUpperCase()}
-            </Text>
-          </View>
-          <View style={styles.collectionRight}>
-            <Text style={styles.gold}>🪙 {store.progress.gold}</Text>
-            <Ionicons name="chevron-forward" size={24} color={colors.primary} />
-          </View>
-        </View>
-        <View style={styles.masterySummary}>
-          <Text style={styles.shardText}>
-            {t(store.uiLanguage, 'bibleMastery')} {Math.round(bibleMastery * 100)}%
-          </Text>
-          <ProgressBar value={bibleMastery} color={colors.primary} />
-        </View>
-        <View style={styles.shards}>
-          <Text style={styles.shardText}>
-            🧩 {targetShards} / {targetCharacter.unlockCost} {t(store.uiLanguage, 'shards')}
-          </Text>
-          <ProgressBar
-            value={targetShards / targetCharacter.unlockCost}
-            color={rarityColors[targetCharacter.rarity]}
-          />
-        </View>
+        <Text style={styles.moreButtonText}>{u(showMore ? 'Show less' : 'Show more')}</Text>
+        <Ionicons
+          name={showMore ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={colors.primary}
+        />
       </Pressable>
 
-      <View style={styles.sectionTitle}>
-        <Text style={styles.h2}>{t(store.uiLanguage, 'achievements')}</Text>
-        <Text style={styles.achievementCount}>
-          {achievements.filter((item) => item.complete).length}/{achievements.length}
-        </Text>
-      </View>
-      <View style={styles.achievementGrid}>
-        {achievements.slice(0, 4).map((item) => (
-          <View key={item.id} style={[styles.achievement, item.complete && styles.achievementDone]}>
-            <Text style={styles.achievementIcon}>{item.icon}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.achievementTitle}>{t(store.uiLanguage, item.titleKey)}</Text>
-              <Text numberOfLines={2} style={styles.achievementDescription}>
-                {t(store.uiLanguage, item.descriptionKey)}
-              </Text>
-              <View style={styles.achievementBottom}>
-                <Text style={styles.achievementProgress}>
-                  {item.progress}/{item.target}
-                </Text>
-                {item.complete && (
-                  <Ionicons name="checkmark-circle" size={17} color={colors.mint} />
-                )}
+      {showMore && (
+        <>
+          <View style={styles.activityRow}>
+            <MiniStat
+              value={store.progress.activeDates.length}
+              label={t(store.uiLanguage, 'daysActive')}
+            />
+            <MiniStat value={store.progress.streak} label={t(store.uiLanguage, 'currentStreak')} />
+            <MiniStat
+              value={store.progress.longestStreak}
+              label={t(store.uiLanguage, 'bestStreak')}
+            />
+          </View>
+          <Card style={styles.questCard}>
+            <View style={styles.rowBetween}>
+              <Eyebrow>{t(store.uiLanguage, 'todaysQuest')}</Eyebrow>
+              <Text style={styles.questCount}>{questDone}/3</Text>
+            </View>
+            {questDone < 3 && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={dailyFocus.action}
+                style={styles.focus}
+              >
+                <Ionicons name="sparkles" size={19} color={colors.primary} />
+                <View style={styles.focusCopy}>
+                  <Text style={styles.focusEyebrow}>{u("TODAY'S FOCUS")}</Text>
+                  <Text style={styles.focusTitle}>{dailyFocus.label}</Text>
+                  <Text style={styles.focusHint}>{u("Optional · advances today's quest")}</Text>
+                </View>
+                <Ionicons name="arrow-forward" size={18} color={colors.primary} />
+              </Pressable>
+            )}
+            <View style={styles.questList}>
+              <Quest done={reviewsToday.length >= 3} label={t(store.uiLanguage, 'questReview')} />
+              <Quest done={perfectToday} label={t(store.uiLanguage, 'questPerfect')} />
+              <Quest done={learnedToday} label={t(store.uiLanguage, 'questNew')} />
+            </View>
+          </Card>
+          <Text style={styles.homeSectionLabel}>{u('MEMORIZATION PROGRESS')}</Text>
+          <Card style={styles.coachCard}>
+            <View style={styles.coachTop}>
+              <View style={styles.coachIcon}>
+                <Ionicons name="compass" size={25} color={colors.white} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Eyebrow>{t(store.uiLanguage, 'memoryCoach').toUpperCase()}</Eyebrow>
+                <Text style={styles.coachTitle}>{t(store.uiLanguage, 'coachReady')}</Text>
               </View>
             </View>
-          </View>
-        ))}
-      </View>
+            <Text style={styles.coachMessage}>{coachMessage}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={coachVerse?.reference}
+              disabled={!coachVerse}
+              onPress={() => coachVerse && onStart(coachVerse)}
+              style={styles.coachAction}
+            >
+              <Text style={styles.coachReference}>{coachVerse?.reference}</Text>
+              <Ionicons name="arrow-forward-circle" size={26} color={colors.primary} />
+            </Pressable>
+            <View style={styles.radar}>
+              <RadarStat
+                icon="time"
+                value={dueSoon}
+                label={t(store.uiLanguage, 'dueSoon')}
+                color={colors.gold}
+              />
+              <RadarStat
+                icon="warning"
+                value={mistakeCount}
+                label={t(store.uiLanguage, 'weakWords')}
+                color={colors.coral}
+              />
+              <RadarStat
+                icon="shield-checkmark"
+                value={strongCount}
+                label={t(store.uiLanguage, 'strongVerses')}
+                color={colors.mint}
+              />
+            </View>
+          </Card>
 
-      <View style={styles.sectionTitle}>
-        <Text style={styles.h2}>{t(store.uiLanguage, 'atRisk')}</Text>
-        <Ionicons name="shield-checkmark-outline" size={22} color={colors.mint} />
-      </View>
-      {atRisk.length ? (
-        atRisk.map(({ verse, mastery }) => (
+          <View style={styles.reviewHealth}>
+            <View style={styles.rowBetween}>
+              <Eyebrow>{t(store.uiLanguage, 'reviewHealth').toUpperCase()}</Eyebrow>
+              <Text style={styles.reviewHealthValue}>{health}%</Text>
+            </View>
+            <ProgressBar
+              value={health / 100}
+              color={health >= 80 ? colors.mint : health >= 50 ? colors.gold : colors.coral}
+            />
+          </View>
           <Pressable
-            key={verse.id}
+            style={({ pressed }) => [
+              styles.startCard,
+              pressed && { opacity: 0.9 },
+              !due.length && { opacity: 0.55 },
+            ]}
+            onPress={() => due.length && onReview('normal')}
+            disabled={!due.length}
             accessibilityRole="button"
-            accessibilityLabel={verse.reference}
-            onPress={() => onStart(verse)}
           >
-            <Card style={styles.riskCard}>
-              <View style={styles.rowBetween}>
-                <View>
-                  <Text style={styles.reference}>{verse.reference}</Text>
-                  <Text style={styles.riskReason}>{t(store.uiLanguage, 'whyDue')}</Text>
-                </View>
-                <Text style={styles.riskValue}>{100 - recallRisk(mastery, now)}%</Text>
-              </View>
-              <ProgressBar value={retrievability(mastery, now)} color={colors.coral} />
-            </Card>
+            <View style={styles.startIcon}>
+              <Ionicons name="play" size={24} color={colors.primary} />
+            </View>
+            <View style={styles.startCopy}>
+              <Eyebrow>
+                {due.length
+                  ? `${due.length} ${t(store.uiLanguage, 'dueReview')}`
+                  : t(store.uiLanguage, 'noDue')}
+              </Eyebrow>
+              <Text style={styles.startTitle}>{t(store.uiLanguage, 'normalReview')}</Text>
+              <Text style={styles.startSub}>
+                {due[0]?.reference ?? t(store.uiLanguage, 'noDue')}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={26} color={colors.white} />
           </Pressable>
-        ))
-      ) : (
-        <Card>
-          <Text style={styles.empty}>{t(store.uiLanguage, 'weakEmpty')}</Text>
-        </Card>
+          <Text style={styles.homeSectionLabel}>{u('CHARACTER + CURRENT PERIOD')}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t(store.uiLanguage, 'collection')}
+            onPress={onOpenCollection}
+            style={({ pressed }) => [styles.collectionCard, pressed && { opacity: 0.88 }]}
+          >
+            <View style={styles.collectionTop}>
+              <Image
+                source={targetCharacter.image}
+                style={[
+                  styles.targetPortrait,
+                  { borderColor: rarityColors[targetCharacter.rarity] },
+                ]}
+              />
+              <View style={styles.collectionCopy}>
+                <Eyebrow>{t(store.uiLanguage, 'collection').toUpperCase()}</Eyebrow>
+                <Text style={styles.collectionTitle}>
+                  {targetCharacter.names[store.uiLanguage]}
+                </Text>
+                <Text style={styles.currentPeriodText}>
+                  {currentPeriod.icon} {currentPeriod.names[store.uiLanguage]}
+                </Text>
+                <Text
+                  style={[styles.targetRarity, { color: rarityColors[targetCharacter.rarity] }]}
+                >
+                  {t(store.uiLanguage, targetCharacter.rarity).toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.collectionRight}>
+                <Text style={styles.gold}>🪙 {store.progress.gold}</Text>
+                <Ionicons name="chevron-forward" size={24} color={colors.primary} />
+              </View>
+            </View>
+            <View style={styles.masterySummary}>
+              <Text style={styles.shardText}>
+                {t(store.uiLanguage, 'bibleMastery')} {Math.round(bibleMastery * 100)}%
+              </Text>
+              <ProgressBar value={bibleMastery} color={colors.primary} />
+            </View>
+            <View style={styles.shards}>
+              <Text style={styles.shardText}>
+                🧩 {targetShards} / {targetCharacter.unlockCost} {t(store.uiLanguage, 'shards')}
+              </Text>
+              <ProgressBar
+                value={targetShards / targetCharacter.unlockCost}
+                color={rarityColors[targetCharacter.rarity]}
+              />
+            </View>
+          </Pressable>
+
+          <Text style={styles.homeSectionLabel}>{u('READING PLAN')}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={u('Choose a Reading Plan')}
+            onPress={onOpenVerses}
+            style={({ pressed }) => [styles.readingPlanCard, pressed && { opacity: 0.86 }]}
+          >
+            <View
+              style={[styles.planIcon, { backgroundColor: activePlan?.color ?? colors.primary }]}
+            >
+              <Text style={styles.planIconText}>{activePlan?.icon ?? '📖'}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.planEyebrow}>
+                {u(activePlan ? 'CONTINUE READING' : 'START A CHALLENGE')}
+              </Text>
+              <Text style={styles.planTitle}>
+                {activePlan?.title[store.uiLanguage] ?? u('Choose a Reading Plan')}
+              </Text>
+              <Text style={styles.planSub}>
+                {activePlan && activePlanProgress
+                  ? `${activePlanProgress.completedDays.length}/${activePlan.durationDays} daily goals complete`
+                  : 'Visual goals · daily progress · rewards'}
+              </Text>
+              {activePlan && activePlanProgress && (
+                <ProgressBar
+                  value={activePlanProgress.completedDays.length / activePlan.durationDays}
+                  color={activePlan.color}
+                />
+              )}
+            </View>
+            <Ionicons name="chevron-forward" size={23} color={colors.primary} />
+          </Pressable>
+
+          <Text style={styles.homeSectionLabel}>{u('RECOMMENDED')}</Text>
+          <View style={styles.sectionTitle}>
+            <Text style={styles.h2}>{t(store.uiLanguage, 'achievements')}</Text>
+            <Text style={styles.achievementCount}>
+              {achievements.filter((item) => item.complete).length}/{achievements.length}
+            </Text>
+          </View>
+          <View style={styles.achievementGrid}>
+            {achievements.map((item) => (
+              <View
+                key={item.id}
+                style={[styles.achievement, item.complete && styles.achievementDone]}
+              >
+                <Text style={styles.achievementIcon}>{item.icon}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.achievementTitle}>{t(store.uiLanguage, item.titleKey)}</Text>
+                  <Text numberOfLines={2} style={styles.achievementDescription}>
+                    {t(store.uiLanguage, item.descriptionKey)}
+                  </Text>
+                  <View style={styles.achievementBottom}>
+                    <Text style={styles.achievementProgress}>
+                      {item.progress}/{item.target}
+                    </Text>
+                    {item.complete && (
+                      <Ionicons name="checkmark-circle" size={17} color={colors.mint} />
+                    )}
+                  </View>
+                  {item.complete && ACHIEVEMENT_REWARDS[item.id] && (
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={store.progress.claimedAchievements.includes(item.id)}
+                      onPress={() => store.claimAchievementReward(item.id)}
+                      style={styles.achievementClaim}
+                    >
+                      <Text style={styles.achievementClaimText}>
+                        {store.progress.claimedAchievements.includes(item.id)
+                          ? u('Reward claimed')
+                          : `${t(store.uiLanguage, 'claimReward')} · 🪙 ${ACHIEVEMENT_REWARDS[item.id]!.gold}${ACHIEVEMENT_REWARDS[item.id]!.fragments ? ` · ◆ ${ACHIEVEMENT_REWARDS[item.id]!.fragments}` : ''}`}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            ))}
+          </View>
+
+          <View style={styles.sectionTitle}>
+            <Text style={styles.h2}>{t(store.uiLanguage, 'atRisk')}</Text>
+            <Ionicons name="shield-checkmark-outline" size={22} color={colors.mint} />
+          </View>
+          {atRisk.length ? (
+            atRisk.map(({ verse, mastery }) => (
+              <Pressable
+                key={verse.id}
+                accessibilityRole="button"
+                accessibilityLabel={verse.reference}
+                onPress={() => onStart(verse)}
+              >
+                <Card style={styles.riskCard}>
+                  <View style={styles.rowBetween}>
+                    <View>
+                      <Text style={styles.reference}>{verse.reference}</Text>
+                      <Text style={styles.riskReason}>{t(store.uiLanguage, 'whyDue')}</Text>
+                    </View>
+                    <Text style={styles.riskValue}>{100 - recallRisk(mastery, now)}%</Text>
+                  </View>
+                  <ProgressBar value={retrievability(mastery, now)} color={colors.coral} />
+                </Card>
+              </Pressable>
+            ))
+          ) : (
+            <Card>
+              <Text style={styles.empty}>{t(store.uiLanguage, 'weakEmpty')}</Text>
+            </Card>
+          )}
+        </>
       )}
       <View style={{ height: 28 }} />
     </ScrollView>
@@ -531,6 +813,89 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  homeSectionLabel: {
+    marginTop: 4,
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+  },
+  todayActions: { flexDirection: 'row', alignItems: 'stretch', gap: 9 },
+  todayActionColumn: { flex: 1, gap: 7 },
+  homePaths: {
+    gap: 9,
+    padding: 13,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: '#C5A55F',
+    backgroundColor: '#FFF7E5',
+  },
+  pathsLink: { color: colors.primary, fontSize: 11, fontWeight: '900' },
+  homePathCard: {
+    minHeight: 66,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.white,
+  },
+  homePathIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+  homePathCopy: { flex: 1, gap: 3 },
+  homePathTitle: { color: colors.ink, fontSize: 13, fontWeight: '900' },
+  homePathDetail: { color: colors.muted, fontSize: 10 },
+  homePathPercent: { color: colors.primary, fontSize: 13, fontWeight: '900' },
+  continueToday: {
+    minHeight: 79,
+    borderRadius: radius.lg,
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F2CA60',
+    borderWidth: 1,
+    borderColor: '#AE7926',
+  },
+  continueIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFF8DF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  continueTitle: { color: '#2B1748', fontSize: 14, fontWeight: '900' },
+  continueSub: { color: '#644C2F', fontSize: 9, lineHeight: 12, marginTop: 2 },
+  readToday: {
+    minHeight: 58,
+    borderRadius: radius.lg,
+    padding: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  readTodayIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primarySoft,
+  },
+  readTodayTitle: { flex: 1, color: colors.ink, fontSize: 12, fontWeight: '900' },
+  readTodaySub: { color: colors.muted, fontSize: 10, marginTop: 3 },
   stats: {
     flexDirection: 'row',
     backgroundColor: '#17132E',
@@ -570,6 +935,12 @@ const styles = StyleSheet.create({
   levelShieldText: { color: colors.white, fontSize: 22, fontWeight: '900' },
   levelXp: { fontSize: 11, fontWeight: '900', color: colors.primary },
   levelRemaining: { fontSize: 10, fontWeight: '700', color: colors.muted },
+  progressDivider: { height: 1, backgroundColor: colors.line, marginVertical: 2 },
+  compactProgressRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  compactProgressCopy: { width: 104 },
+  compactProgressTitle: { color: colors.muted, fontSize: 9, fontWeight: '900' },
+  compactProgressValue: { color: colors.ink, fontSize: 12, fontWeight: '900', marginTop: 1 },
+  compactBar: { flex: 1 },
   levelReward: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -598,6 +969,16 @@ const styles = StyleSheet.create({
   },
   claimButtonText: { color: colors.white, fontSize: 10, fontWeight: '900' },
   dailyCard: { gap: 12 },
+  moreButton: {
+    minHeight: 42,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  moreButtonText: { color: colors.primary, fontWeight: '900' },
   dailyValue: { fontSize: 20, fontWeight: '900', color: colors.ink, marginTop: 4 },
   goalIcon: {
     width: 44,
@@ -629,6 +1010,18 @@ const styles = StyleSheet.create({
   questCard: { gap: 14 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   questCount: { fontWeight: '900', color: colors.mint },
+  focus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 11,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+  },
+  focusCopy: { flex: 1, gap: 1 },
+  focusEyebrow: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
+  focusTitle: { color: colors.ink, fontSize: 13, fontWeight: '900' },
+  focusHint: { color: colors.muted, fontSize: 10 },
   questList: { gap: 9 },
   quest: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   questLabel: { fontSize: 14, color: colors.inkSoft, fontWeight: '600' },
@@ -731,11 +1124,34 @@ const styles = StyleSheet.create({
   collectionCopy: { flex: 1 },
   collectionRight: { alignItems: 'flex-end', gap: 12 },
   collectionTitle: { fontSize: 18, fontWeight: '900', color: colors.ink, marginTop: 4 },
+  currentPeriodText: { color: colors.inkSoft, fontSize: 10, fontWeight: '800', marginTop: 2 },
   targetRarity: { fontSize: 10, fontWeight: '900', marginTop: 3, letterSpacing: 0.8 },
   gold: { fontSize: 16, fontWeight: '900', color: colors.gold },
   masterySummary: { gap: 7 },
   shards: { gap: 7 },
   shardText: { fontSize: 12, fontWeight: '800', color: colors.inkSoft },
+  readingPlanCard: {
+    minHeight: 92,
+    borderRadius: radius.lg,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#F7F1FF',
+    borderWidth: 1,
+    borderColor: '#D8C8ED',
+  },
+  planIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planIconText: { fontSize: 25 },
+  planEyebrow: { color: colors.primary, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+  planTitle: { color: colors.ink, fontSize: 16, fontWeight: '900', marginTop: 2 },
+  planSub: { color: colors.muted, fontSize: 10, marginTop: 3, marginBottom: 6 },
   sectionTitle: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -768,6 +1184,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 7,
   },
+  achievementClaim: {
+    alignSelf: 'flex-start',
+    marginTop: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySoft,
+  },
+  achievementClaimText: { color: colors.primary, fontSize: 9, fontWeight: '900' },
   achievementProgress: { fontSize: 10, fontWeight: '900', color: colors.primary },
   riskCard: { gap: 12, marginBottom: 10 },
   reference: { fontWeight: '900', color: colors.ink, fontSize: 16 },

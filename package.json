@@ -1,5 +1,5 @@
 {
-  "name": "scriptora",
+  "name": "bibliavia",
   "version": "0.1.0",
   "private": true,
   "main": "index.js",
@@ -7,7 +7,7 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web",
+    "web": "expo start --web --port 8081",
     "format": "prettier --write \"App.tsx\" \"src/**/*.{ts,tsx}\"",
     "format:check": "prettier --check \"App.tsx\" \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
@@ -21,22 +21,25 @@
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@supabase/supabase-js": "2.112.4",
-    "expo": "~57.0.15",
-    "expo-auth-session": "~57.0.9",
+    "expo": "~57.0.18",
+    "expo-audio": "~57.0.4",
+    "expo-auth-session": "~57.0.10",
     "expo-font": "~57.0.1",
+    "expo-haptics": "~57.0.2",
     "expo-localization": "~57.0.1",
+    "expo-speech": "~57.0.2",
     "expo-status-bar": "~57.0.1",
     "expo-web-browser": "~57.0.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-native": "0.86.2",
+    "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-web": "~0.21.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
     "prettier": "^3.6.2",
-    "typescript": "~5.9.3",
+    "typescript": "~6.0.3",
     "vitest": "^4.0.18"
   }
 }

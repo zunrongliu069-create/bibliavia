@@ -1,25 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { chestImageForTier } from '../data/chests';
+import React, { useState } from 'react';
+import { ImageBackground, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { curricula } from '../data/curriculum';
+import { uiText } from '../lib/uiText';
 import { shadow } from '../theme';
 import type { CampaignId, Verse } from '../types';
 import { useAppStore } from '../store/AppStore';
 
-const nodePositions = [
-  { top: '27%', left: '53%' },
-  { top: '36%', left: '42%' },
-  { top: '46%', left: '51%' },
-  { top: '56%', left: '40%' },
-  { top: '65%', left: '49%' },
-] as const;
+const parchmentPath = require('../../assets/game/scriptora-parchment-path.png');
 
 export function CampaignScreen({ onStart }: { onStart: (verse: Verse) => void }) {
   const store = useAppStore();
-  const [showSkip, setShowSkip] = useState(false);
-  const [showReward, setShowReward] = useState<'chest' | 'character' | null>(null);
-  const mapChestSpin = useRef(new Animated.Value(0)).current;
+  const u = (text: string) => uiText(store.uiLanguage, text);
+  const [showChapters, setShowChapters] = useState(false);
   const current = curricula.find((item) => item.id === store.progress.activeCampaign)!;
   const campaignVerses = store.availableVerses.filter((verse) => verse.bookId === current.id);
   const availableChapters = current.chapters.filter((chapter) =>
@@ -45,414 +38,314 @@ export function CampaignScreen({ onStart }: { onStart: (verse: Verse) => void })
     (verse) => (store.progress.mastery[verse.id]?.successfulRecalls ?? 0) > 0,
   ).length;
   const progress = chapterVerses.length ? completed / chapterVerses.length : 0;
-  const displayBook = nextVerse?.bookName ?? current.title;
+  const displayBook = nextVerse?.bookName ?? u(current.title);
   const displayChapter = activeChapter?.chapter ?? 1;
   const selectableCurricula = curricula.filter((item) =>
     store.availableVerses.some((verse) => verse.bookId === item.id),
   );
+
   const selectChapter = (chapter: number) => {
     store.setPathChapter(current.id, chapter);
-    setShowSkip(false);
-  };
-  const spinMapChest = () => {
-    mapChestSpin.stopAnimation();
-    mapChestSpin.setValue(0);
-    Animated.timing(mapChestSpin, {
-      toValue: 1,
-      duration: 520,
-      easing: Easing.out(Easing.back(1.35)),
-      useNativeDriver: true,
-    }).start();
-    setShowReward(showReward === 'chest' ? null : 'chest');
-  };
-  const mapChestStyle = {
-    transform: [
-      { perspective: 700 },
-      {
-        rotateY: mapChestSpin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }),
-      },
-      { scale: mapChestSpin.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.1, 1] }) },
-    ],
+    setShowChapters(false);
   };
 
   return (
     <View style={styles.screen}>
-      <View style={styles.world}>
-        <View style={styles.chapterBanner}>
-          <Text style={styles.chapterTitle}>
-            {displayBook} {displayChapter}
-          </Text>
-          <Text style={styles.chapterSubtitle}>{activeChapter?.theme ?? 'The journey begins'}</Text>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${Math.max(6, progress * 100)}%` }]} />
-          </View>
-          <Text style={styles.progressText}>
-            {completed}/{chapterVerses.length} lessons mastered
-          </Text>
-        </View>
-
-        {selectableCurricula.length > 1 && (
-          <View style={styles.bookSwitch}>
-            {selectableCurricula.map((item) => (
-              <Pressable
-                key={item.id}
-                onPress={() => store.setCampaign(item.id as CampaignId)}
-                style={[styles.bookPill, item.id === current.id && styles.bookPillActive]}
-              >
-                <Text
-                  style={[styles.bookPillText, item.id === current.id && styles.bookPillTextActive]}
-                >
-                  {item.title}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        )}
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Chest milestone"
-          onPress={spinMapChest}
-          style={styles.chestHotspot}
+      <ImageBackground source={parchmentPath} resizeMode="cover" style={styles.background}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
         >
-          <Animated.Image
-            source={chestImageForTier(2)}
-            style={[styles.mapChestImage, mapChestStyle]}
-          />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Locked character card"
-          onPress={() => setShowReward(showReward === 'character' ? null : 'character')}
-          style={styles.characterHotspot}
-        />
-        {showReward === 'chest' && (
-          <View style={[styles.rewardBubble, styles.chestBubble]}>
-            <Text style={styles.rewardEyebrow}>UPGRADE CHEST</Text>
-            <Text style={styles.rewardText}>
-              Finish this chapter, then tap the chest three times for a chance to upgrade it.
-            </Text>
-          </View>
-        )}
-        {showReward === 'character' && (
-          <View style={[styles.rewardBubble, styles.characterBubble]}>
-            <Text style={styles.rewardEyebrow}>LOCKED CHARACTER</Text>
-            <Text style={styles.rewardText}>
-              Collect shards and complete reading quests to unlock this card.
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.nodes} pointerEvents="box-none">
-          {pathVerses.map((verse, index) => {
-            const done = (store.progress.mastery[verse.id]?.successfulRecalls ?? 0) > 0;
-            const isNext = verse.id === nextVerse?.id;
-            return (
-              <Pressable
-                key={verse.id}
-                accessibilityRole="button"
-                accessibilityLabel={`Start lesson ${verse.reference}`}
-                onPress={() => onStart(verse)}
-                style={({ pressed }) => [
-                  styles.node,
-                  {
-                    top: nodePositions[index]?.top ?? '50%',
-                    left: nodePositions[index]?.left ?? '50%',
-                  },
-                  done && styles.nodeDone,
-                  isNext && styles.nodeCurrent,
-                  pressed && styles.nodePressed,
-                ]}
-              >
-                {done ? (
-                  <Ionicons name="checkmark" size={20} color="#173B31" />
-                ) : isNext ? (
-                  <Ionicons name="play" size={19} color="#2A1455" />
-                ) : (
-                  <Text style={styles.nodeText}>{verse.verseStart}</Text>
-                )}
-                <Text style={[styles.nodeCaption, (done || isNext) && styles.nodeCaptionDark]}>
-                  {isNext ? 'NEXT' : done ? 'DONE' : `V${verse.verseStart}`}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Skip ahead challenge"
-          onPress={() => setShowSkip(true)}
-          style={({ pressed }) => [styles.skipButton, pressed && styles.pressed]}
-        >
-          <Ionicons name="play-skip-forward" size={18} color="#F8DA78" />
-          <Text style={styles.skipText}>Skip ahead</Text>
-        </Pressable>
-
-        {nextVerse && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Start lesson ${nextVerse.reference}`}
-            onPress={() => onStart(nextVerse)}
-            style={({ pressed }) => [styles.nextLesson, pressed && styles.pressed]}
-          >
-            <Text style={styles.nextEyebrow}>NEXT LESSON</Text>
-            <Text style={styles.nextReference}>{nextVerse.reference}</Text>
-            <Text numberOfLines={2} style={styles.nextPreview}>
-              {nextVerse.text}
-            </Text>
-            <View style={styles.startRow}>
-              <Ionicons name="book" size={19} color="#2A1455" />
-              <Text style={styles.startText}>START ADVENTURE</Text>
-              <Ionicons name="chevron-forward" size={19} color="#2A1455" />
-            </View>
-          </Pressable>
-        )}
-
-        {showSkip && (
-          <View style={styles.skipPanel}>
-            <View style={styles.skipHeader}>
-              <View>
-                <Text style={styles.skipEyebrow}>SKIP CHALLENGE</Text>
-                <Text style={styles.skipTitle}>Choose a chapter</Text>
+          <View style={styles.chapterBanner}>
+            <Text style={styles.illuminatedInitial}>{displayBook.charAt(0)}</Text>
+            <View style={styles.chapterCopy}>
+              <Text style={styles.chapterTitle}>
+                {displayBook} {displayChapter}
+              </Text>
+              <Text style={styles.chapterSubtitle}>
+                {store.uiLanguage === 'en'
+                  ? (activeChapter?.theme ?? u('The journey begins'))
+                  : `${u('Chapter')} ${displayChapter}`}
+              </Text>
+              <View style={styles.progressRow}>
+                <View style={styles.progressTrack}>
+                  <View
+                    style={[styles.progressFill, { width: `${Math.max(5, progress * 100)}%` }]}
+                  />
+                </View>
+                <Text style={styles.progressText}>{Math.round(progress * 100)}%</Text>
               </View>
-              <Pressable accessibilityLabel="Close" onPress={() => setShowSkip(false)}>
-                <Ionicons name="close-circle" size={29} color="#F8DA78" />
-              </Pressable>
             </View>
-            <Text style={styles.skipNote}>
-              Jump ahead and prove your recall. You can always return to earlier lessons.
-            </Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chapterRow}
-            >
-              {availableChapters.map((chapter) => (
+          </View>
+
+          <View style={styles.controlsRow}>
+            <View style={styles.bookSwitch}>
+              {selectableCurricula.map((item) => (
                 <Pressable
-                  key={chapter.chapter}
-                  onPress={() => selectChapter(chapter.chapter)}
-                  style={[
-                    styles.chapterPick,
-                    chapter.chapter === displayChapter && styles.chapterPickActive,
-                  ]}
+                  key={item.id}
+                  onPress={() => store.setCampaign(item.id as CampaignId)}
+                  style={[styles.bookPill, item.id === current.id && styles.bookPillActive]}
                 >
-                  <Text style={styles.chapterPickText}>{chapter.chapter}</Text>
+                  <Text
+                    style={[
+                      styles.bookPillText,
+                      item.id === current.id && styles.bookPillTextActive,
+                    ]}
+                  >
+                    {u(item.title)}
+                  </Text>
                 </Pressable>
               ))}
-            </ScrollView>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={u('Choose a chapter')}
+              onPress={() => setShowChapters((value) => !value)}
+              style={styles.chapterButton}
+            >
+              <Ionicons name="list" size={17} color="#F4D26C" />
+            </Pressable>
           </View>
-        )}
-      </View>
+
+          {showChapters && (
+            <View style={styles.chapterPanel}>
+              <Text style={styles.panelTitle}>{u('Choose a chapter')}</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {availableChapters.map((chapter) => (
+                  <Pressable
+                    key={chapter.chapter}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${u('Chapter')} ${chapter.chapter}`}
+                    onPress={() => selectChapter(chapter.chapter)}
+                    style={[
+                      styles.chapterPick,
+                      chapter.chapter === displayChapter && styles.chapterPickActive,
+                    ]}
+                  >
+                    <Text style={styles.chapterPickText}>{chapter.chapter}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          <View style={styles.timeline}>
+            {pathVerses.map((verse, index) => {
+              const done = (store.progress.mastery[verse.id]?.successfulRecalls ?? 0) > 0;
+              const isNext = verse.id === nextVerse?.id;
+              return (
+                <View key={verse.id} style={[styles.lessonRow, isNext && styles.currentLessonRow]}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${u('Start lesson')} ${verse.reference}`}
+                    onPress={() => onStart(verse)}
+                    style={({ pressed }) => [
+                      styles.node,
+                      done && styles.nodeDone,
+                      isNext && styles.nodeCurrent,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    {done ? (
+                      <Ionicons name="checkmark" size={24} color="#23483F" />
+                    ) : isNext ? (
+                      <Ionicons name="book" size={22} color="#2E174F" />
+                    ) : (
+                      <Text style={styles.nodeNumber}>{index + pathWindowStart + 1}</Text>
+                    )}
+                  </Pressable>
+
+                  <View style={[styles.lessonCopy, isNext && styles.currentLessonCard]}>
+                    <Text style={styles.lessonLabel}>
+                      {u(done ? 'LESSON COMPLETE' : isNext ? 'CURRENT LESSON' : 'UPCOMING')}
+                    </Text>
+                    <Text style={styles.lessonReference}>{verse.reference}</Text>
+                    {isNext && (
+                      <>
+                        <Text numberOfLines={3} style={styles.lessonPreview}>
+                          {verse.text}
+                        </Text>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${u('Start adventure')} ${verse.reference}`}
+                          onPress={() => onStart(verse)}
+                          style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
+                        >
+                          <Ionicons name="book" size={18} color="#2E174F" />
+                          <Text style={styles.startText}>{u('START ADVENTURE')}</Text>
+                          <Ionicons name="chevron-forward" size={18} color="#2E174F" />
+                        </Pressable>
+                      </>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </ScrollView>
+      </ImageBackground>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  world: { flex: 1, overflow: 'hidden' },
+  screen: { flex: 1, backgroundColor: '#F1E4C8' },
+  background: { flex: 1 },
+  scrollContent: { paddingTop: 16, paddingBottom: 40, minHeight: 910 },
   chapterBanner: {
-    position: 'absolute',
-    top: 10,
-    left: 24,
-    right: 24,
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(69,34,119,.94)',
+    marginHorizontal: 14,
+    minHeight: 116,
+    borderRadius: 18,
     borderWidth: 2,
-    borderBottomWidth: 5,
-    borderColor: '#E4B951',
-    borderRadius: 20,
+    borderColor: '#C9A64D',
+    backgroundColor: 'rgba(48, 25, 82, 0.96)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
     ...shadow,
   },
-  chapterTitle: {
-    fontSize: 27,
-    lineHeight: 30,
-    fontWeight: '900',
-    color: '#FFF',
-    textShadowColor: '#241039',
+  illuminatedInitial: {
+    width: 64,
+    textAlign: 'center',
+    fontFamily: 'Georgia',
+    fontSize: 62,
+    lineHeight: 70,
+    color: '#F3D77A',
+    textShadowColor: '#150A28',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 2,
   },
-  chapterSubtitle: { fontSize: 11, fontWeight: '800', color: '#F8DA78', marginTop: 2 },
+  chapterCopy: { flex: 1, marginLeft: 12 },
+  chapterTitle: { color: '#FFF8E7', fontFamily: 'Georgia', fontSize: 24, fontWeight: '700' },
+  chapterSubtitle: { color: '#D8C9E5', fontSize: 12, marginTop: 2, marginBottom: 10 },
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   progressTrack: {
-    width: '78%',
+    flex: 1,
     height: 7,
-    borderRadius: 99,
-    backgroundColor: '#241339',
-    marginTop: 7,
+    borderRadius: 9,
+    backgroundColor: '#1D1032',
     overflow: 'hidden',
   },
-  progressFill: { height: '100%', backgroundColor: '#9F65FF', borderRadius: 99 },
-  progressText: { fontSize: 9, fontWeight: '800', color: '#EEE5FF', marginTop: 4 },
+  progressFill: { height: '100%', borderRadius: 9, backgroundColor: '#F3D77A' },
+  progressText: { color: '#F3D77A', fontSize: 11, fontWeight: '800' },
+  controlsRow: { marginTop: 12, marginHorizontal: 14, flexDirection: 'row', gap: 8 },
   bookSwitch: {
-    position: 'absolute',
-    top: 117,
-    left: 16,
-    right: 16,
+    flex: 1,
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 7,
+    borderRadius: 22,
+    padding: 3,
+    backgroundColor: 'rgba(255,250,236,0.94)',
+    borderWidth: 1,
+    borderColor: '#BFA56B',
   },
   bookPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    backgroundColor: 'rgba(16,19,45,.9)',
-    borderRadius: 99,
-    borderWidth: 1.5,
-    borderBottomWidth: 3,
-    borderColor: '#756C92',
-  },
-  bookPillActive: { backgroundColor: '#6F45D8', borderColor: '#F0C55A' },
-  bookPillText: { fontSize: 9, fontWeight: '900', color: '#D8D2E8' },
-  bookPillTextActive: { color: '#FFF' },
-  chestHotspot: {
-    position: 'absolute',
-    left: 0,
-    top: '34%',
-    width: '31%',
-    height: '23%',
+    flex: 1,
+    minHeight: 34,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 18,
+    paddingHorizontal: 8,
   },
-  mapChestImage: { width: 105, height: 94, resizeMode: 'contain' },
-  characterHotspot: { position: 'absolute', right: 0, top: '30%', width: '30%', height: '28%' },
-  rewardBubble: {
-    position: 'absolute',
-    zIndex: 8,
-    width: 178,
-    padding: 12,
-    backgroundColor: 'rgba(20,13,39,.96)',
-    borderWidth: 2,
-    borderColor: '#E6B956',
-    borderRadius: 14,
-    ...shadow,
-  },
-  chestBubble: { left: 12, top: '51%' },
-  characterBubble: { right: 12, top: '48%' },
-  rewardEyebrow: { fontSize: 9, fontWeight: '900', letterSpacing: 1, color: '#F8DA78' },
-  rewardText: { fontSize: 11, lineHeight: 15, fontWeight: '700', color: '#FFF', marginTop: 4 },
-  nodes: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 6 },
-  node: {
-    position: 'absolute',
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2B204A',
-    borderWidth: 3,
-    borderColor: '#8B72AD',
-    borderBottomWidth: 6,
-    ...shadow,
-  },
-  nodeDone: { backgroundColor: '#60C9A5', borderColor: '#D9FFF1' },
-  nodeCurrent: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#F2C85E',
-    borderColor: '#FFF2B8',
-  },
-  nodePressed: { transform: [{ scale: 0.94 }] },
-  nodeText: { fontSize: 17, fontWeight: '900', color: '#FFF' },
-  nodeCaption: {
-    position: 'absolute',
-    bottom: -18,
-    minWidth: 44,
-    textAlign: 'center',
-    fontSize: 7,
-    fontWeight: '900',
-    letterSpacing: 0.6,
-    color: '#FFF',
-    backgroundColor: 'rgba(26,17,47,.92)',
-    borderRadius: 99,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  nodeCaptionDark: { color: '#2A1455', backgroundColor: '#FFF5C7' },
-  skipButton: {
-    position: 'absolute',
-    right: 12,
-    bottom: 207,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    backgroundColor: 'rgba(44,24,74,.95)',
-    borderWidth: 1.5,
-    borderColor: '#E2B650',
-    borderRadius: 11,
-    ...shadow,
-  },
-  skipText: { fontSize: 11, fontWeight: '900', color: '#FFF' },
-  pressed: { transform: [{ scale: 0.97 }], opacity: 0.92 },
-  nextLesson: {
-    position: 'absolute',
-    left: 22,
-    right: 22,
-    bottom: 18,
-    alignItems: 'center',
-    padding: 13,
-    backgroundColor: 'rgba(86,39,151,.96)',
-    borderWidth: 3,
-    borderColor: '#F2C85E',
-    borderRadius: 22,
-    ...shadow,
-  },
-  nextEyebrow: { fontSize: 10, fontWeight: '900', letterSpacing: 1.2, color: '#F8DA78' },
-  nextReference: { fontSize: 25, lineHeight: 29, fontWeight: '900', color: '#FFF', marginTop: 2 },
-  nextPreview: {
-    fontSize: 11,
-    lineHeight: 15,
-    textAlign: 'center',
-    fontWeight: '700',
-    color: '#EEE7FF',
-    maxWidth: 300,
-    marginTop: 2,
-  },
-  startRow: {
-    height: 35,
-    alignSelf: 'stretch',
-    marginTop: 9,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#F2C85E',
-    borderRadius: 11,
-  },
-  startText: { fontSize: 11, fontWeight: '900', color: '#2A1455' },
-  skipPanel: {
-    position: 'absolute',
-    zIndex: 20,
-    left: 12,
-    right: 12,
-    bottom: 16,
-    padding: 16,
-    backgroundColor: 'rgba(25,16,48,.98)',
-    borderWidth: 2,
-    borderColor: '#E6B956',
-    borderRadius: 20,
-    ...shadow,
-  },
-  skipHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
-  skipEyebrow: { fontSize: 9, fontWeight: '900', letterSpacing: 1, color: '#F8DA78' },
-  skipTitle: { fontSize: 21, fontWeight: '900', color: '#FFF', marginTop: 2 },
-  skipNote: { fontSize: 11, lineHeight: 16, color: '#D8D2E8', marginTop: 7 },
-  chapterRow: { gap: 8, paddingTop: 12, paddingBottom: 2 },
-  chapterPick: {
+  bookPillActive: { backgroundColor: '#3A205D' },
+  bookPillText: { color: '#725C46', fontSize: 12, fontWeight: '700' },
+  bookPillTextActive: { color: '#FFF7E6' },
+  chapterButton: {
     width: 42,
-    height: 42,
     borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#342252',
-    borderWidth: 1.5,
-    borderColor: '#705697',
+    backgroundColor: '#3A205D',
+    borderWidth: 1,
+    borderColor: '#D0AC50',
   },
-  chapterPickActive: { backgroundColor: '#7348D7', borderColor: '#F0C55A' },
-  chapterPickText: { fontWeight: '900', color: '#FFF' },
+  chapterPanel: {
+    marginHorizontal: 14,
+    marginTop: 8,
+    borderRadius: 14,
+    padding: 12,
+    backgroundColor: 'rgba(48,25,82,0.96)',
+    ...shadow,
+  },
+  panelTitle: { color: '#FFF8E7', fontFamily: 'Georgia', fontWeight: '700', marginBottom: 8 },
+  chapterPick: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#5D4177',
+  },
+  chapterPickActive: { backgroundColor: '#C99C37' },
+  chapterPickText: { color: '#FFF8E7', fontWeight: '800' },
+  timeline: { marginTop: 16, paddingBottom: 16 },
+  lessonRow: {
+    minHeight: 124,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: '39%',
+    paddingRight: 12,
+  },
+  currentLessonRow: { minHeight: 224 },
+  node: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E2D9EE',
+    borderWidth: 3,
+    borderColor: '#745A92',
+    ...shadow,
+  },
+  nodeDone: { backgroundColor: '#A8DACB', borderColor: '#568F80' },
+  nodeCurrent: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    marginLeft: -4,
+    marginRight: -4,
+    backgroundColor: '#F5D56F',
+    borderColor: '#B77820',
+    borderWidth: 4,
+  },
+  nodeNumber: { color: '#3C2658', fontFamily: 'Georgia', fontSize: 21, fontWeight: '800' },
+  lessonCopy: { flex: 1, marginLeft: 12, paddingVertical: 8 },
+  currentLessonCard: {
+    borderRadius: 14,
+    padding: 12,
+    backgroundColor: 'rgba(255,250,238,0.9)',
+    borderWidth: 1,
+    borderColor: '#C7A65C',
+    ...shadow,
+  },
+  lessonLabel: { color: '#8A6231', fontSize: 9, fontWeight: '900', letterSpacing: 1.1 },
+  lessonReference: {
+    color: '#35204E',
+    fontFamily: 'Georgia',
+    fontSize: 18,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  lessonPreview: {
+    color: '#554A43',
+    fontFamily: 'Georgia',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 6,
+  },
+  startButton: {
+    minHeight: 42,
+    marginTop: 10,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F0C85D',
+    borderWidth: 1,
+    borderColor: '#A97223',
+  },
+  startText: { color: '#2E174F', fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  pressed: { opacity: 0.78, transform: [{ scale: 0.98 }] },
 });

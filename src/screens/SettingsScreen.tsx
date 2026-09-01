@@ -1,13 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Button, Card, Eyebrow } from '../components/ui';
 import { translations } from '../data/content';
 import { t } from '../lib/i18n';
+import { uiText } from '../lib/uiText';
 import { colors, radius, shadow } from '../theme';
-import type { UiLanguage } from '../types';
+import type { FeedbackSettings, UiLanguage } from '../types';
 import { useAppStore } from '../store/AppStore';
 import { useAuthStore } from '../store/AuthStore';
+import type { EmailCodeMode } from '../store/AuthStore';
 
 const languages: { id: UiLanguage; label: string }[] = [
   { id: 'en', label: 'English' },
@@ -15,16 +17,47 @@ const languages: { id: UiLanguage; label: string }[] = [
   { id: 'zh-Hans', label: '简体中文' },
   { id: 'zh-Hant', label: '繁體中文' },
 ];
+const feedbackOptions: Array<{
+  key: keyof FeedbackSettings;
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  detail: string;
+}> = [
+  {
+    key: 'soundEffects',
+    icon: 'volume-high',
+    label: 'Sound effects',
+    detail: 'Answers and rewards',
+  },
+  {
+    key: 'ambientMusic',
+    icon: 'musical-notes',
+    label: 'Music / ambient',
+    detail: 'Calm background audio',
+  },
+  {
+    key: 'haptics',
+    icon: 'phone-portrait',
+    label: 'Haptics',
+    detail: 'Touch feedback on supported devices',
+  },
+  {
+    key: 'reduceMotion',
+    icon: 'accessibility',
+    label: 'Reduce Motion',
+    detail: 'Shorter, calmer animations',
+  },
+];
 export function SettingsScreen() {
   const store = useAppStore();
+  const u = (text: string) => uiText(store.uiLanguage, text);
   const auth = useAuthStore();
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [emailCode, setEmailCode] = useState('');
+  const [emailCodeMode, setEmailCodeMode] = useState<EmailCodeMode>('connect');
+  const [codeSent, setCodeSent] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const authBusyRef = useRef(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
@@ -74,7 +107,7 @@ export function SettingsScreen() {
             {t(store.uiLanguage, 'settings')}
           </Text>
           <Text style={{ fontSize: 11, fontWeight: '800', color: '#D8CFEB', marginTop: 3 }}>
-            SCRIPTORA ADVENTURE PROFILE
+            {u('BIBLIAVIA ADVENTURE PROFILE')}
           </Text>
         </View>
       </View>
@@ -86,127 +119,107 @@ export function SettingsScreen() {
             color={colors.primary}
           />
           <View style={{ flex: 1 }}>
-            <Eyebrow>ACCOUNT</Eyebrow>
+            <Eyebrow>{u('ACCOUNT')}</Eyebrow>
             <Text style={styles.accountTitle}>
-              {auth.guest ? 'Guest Mode' : (auth.session?.user.email ?? 'Scriptora account')}
+              {auth.guest ? u('Guest Mode') : (auth.session?.user.email ?? u('Bibliavia account'))}
             </Text>
             <Text style={styles.syncText}>
-              {auth.session ? '✓ Synced' : '⚠ Local only — progress stays on this device'}
+              {auth.session
+                ? store.cloudSyncStatus === 'error'
+                  ? `⚠ ${u('Supabase sync failed — check your connection')}`
+                  : store.cloudSyncStatus === 'syncing'
+                    ? `↻ ${u('Syncing with Supabase…')}`
+                    : `✓ ${u('Synced with Supabase')}`
+                : `✓ ${u('Guest progress saves automatically')}`}
             </Text>
           </View>
         </View>
         {auth.guest ? (
           <>
-            <View style={styles.providerRow}>
-              <View style={{ flex: 1 }}>
-                <Button
-                  label="Log in"
-                  variant={authMode === 'login' ? 'primary' : 'secondary'}
-                  onPress={() => {
-                    setAuthMode('login');
-                    setAuthMessage(null);
-                  }}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Button
-                  label="Create account"
-                  variant={authMode === 'signup' ? 'primary' : 'secondary'}
-                  onPress={() => {
-                    setAuthMode('signup');
-                    setAuthMessage(null);
-                  }}
-                />
-              </View>
-            </View>
-            {authMode === 'signup' && (
-              <TextInput
-                value={displayName}
-                onChangeText={setDisplayName}
-                placeholder="Display name"
-                autoCapitalize="words"
-                style={styles.accountInput}
-              />
-            )}
+            <Text style={styles.passwordHint}>
+              {u('Connect Bibliavia ID without losing progress.')}
+            </Text>
             <TextInput
               value={email}
               onChangeText={setEmail}
-              placeholder="Email"
+              placeholder={u('Email')}
               autoCapitalize="none"
               keyboardType="email-address"
               style={styles.accountInput}
             />
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Password"
-              secureTextEntry
-              style={styles.accountInput}
-            />
-            {authMode === 'signup' && (
-              <TextInput
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                placeholder="Confirm password"
-                secureTextEntry
-                style={styles.accountInput}
-              />
-            )}
-            <Text style={styles.passwordHint}>Use at least 6 characters.</Text>
-            {authMode === 'login' ? (
-              <Button
-                label="Log in"
-                disabled={authBusy || !email.includes('@') || password.length < 6}
-                onPress={() => runAuth(() => auth.signInWithEmail(email, password))}
-              />
+            {!codeSent ? (
+              <>
+                <Button
+                  label={u('Connect Bibliavia ID')}
+                  disabled={authBusy || !email.includes('@')}
+                  onPress={() =>
+                    runAuth(async () => {
+                      setEmailCodeMode('connect');
+                      const error = await auth.requestEmailCode(email, 'connect');
+                      if (!error) setCodeSent(true);
+                      return error ?? u('Verification code sent');
+                    })
+                  }
+                />
+                <Button
+                  label={u('Sign in to existing ID')}
+                  variant="secondary"
+                  disabled={authBusy || !email.includes('@')}
+                  onPress={() =>
+                    runAuth(async () => {
+                      setEmailCodeMode('login');
+                      const error = await auth.requestEmailCode(email, 'login');
+                      if (!error) setCodeSent(true);
+                      return error ?? u('Verification code sent');
+                    })
+                  }
+                />
+              </>
             ) : (
-              <Button
-                label="Create my account"
-                disabled={
-                  authBusy ||
-                  displayName.trim().length < 2 ||
-                  !email.includes('@') ||
-                  password.length < 6 ||
-                  password !== confirmPassword
-                }
-                onPress={() => runAuth(() => auth.signUpWithEmail(email, password, displayName))}
-              />
-            )}
-            {authMode === 'signup' && (
-              <Button
-                label="Resend confirmation email"
-                variant="secondary"
-                disabled={authBusy || !email.includes('@')}
-                onPress={() => runAuth(() => auth.resendConfirmation(email))}
-              />
-            )}
-            <View style={styles.providerRow}>
-              <View style={{ flex: 1 }}>
-                <Button
-                  label="Google"
-                  variant="secondary"
-                  onPress={() => runAuth(() => auth.signInWithProvider('google'))}
+              <>
+                <TextInput
+                  value={emailCode}
+                  onChangeText={setEmailCode}
+                  placeholder={u('6-digit verification code')}
+                  keyboardType="number-pad"
+                  style={styles.accountInput}
                 />
-              </View>
-              <View style={{ flex: 1 }}>
                 <Button
-                  label="Apple"
-                  variant="secondary"
-                  onPress={() => runAuth(() => auth.signInWithProvider('apple'))}
+                  label={u('Verify and continue')}
+                  disabled={authBusy || emailCode.trim().length < 6}
+                  onPress={() =>
+                    runAuth(async () => {
+                      const error = await auth.verifyEmailCode(email, emailCode, emailCodeMode);
+                      if (!error) {
+                        setCodeSent(false);
+                        setEmailCode('');
+                      }
+                      return error;
+                    })
+                  }
                 />
-              </View>
-            </View>
+                <Button
+                  label={u('Use another email')}
+                  variant="ghost"
+                  onPress={() => setCodeSent(false)}
+                />
+              </>
+            )}
             {!auth.configured && (
               <Text style={styles.authNotice}>
-                Cloud login activates when the Supabase environment variables are configured.
+                {u('Cloud login activates when the Supabase environment variables are configured.')}
               </Text>
             )}
           </>
         ) : (
           <>
-            <Button label="Log out" variant="secondary" onPress={() => runAuth(auth.signOut)} />
             <Button
-              label={confirmDelete ? 'Confirm delete account' : 'Delete account'}
+              label={u('Log out to Guest')}
+              variant="secondary"
+              onPress={() => runAuth(auth.signOut)}
+            />
+            <Button
+              label={u(confirmDelete ? 'Confirm delete account' : 'Delete account')}
               variant="secondary"
               onPress={() => {
                 if (!confirmDelete) return setConfirmDelete(true);
@@ -216,10 +229,30 @@ export function SettingsScreen() {
             />
           </>
         )}
-        {authMessage && <Text style={styles.authError}>{authMessage}</Text>}
+        {authMessage && <Text style={styles.authError}>{u(authMessage)}</Text>}
         <Text selectable style={styles.userId}>
-          User ID: {auth.userId ?? 'loading'}
+          {u('Player ID')}: {auth.playerId ?? u('loading')}
         </Text>
+        {auth.savedAccounts.length > 0 && (
+          <View style={styles.savedAccounts}>
+            <Eyebrow>{u('SAVED ACCOUNTS')}</Eyebrow>
+            {auth.savedAccounts.map((account) => (
+              <View key={account.userId} style={styles.savedAccount}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.savedEmail}>{account.email}</Text>
+                  <Text style={styles.savedPlayerId}>{account.playerId}</Text>
+                </View>
+                {account.userId !== auth.session?.user.id && (
+                  <Button
+                    label={u('Switch')}
+                    variant="secondary"
+                    onPress={() => runAuth(() => auth.switchAccount(account.userId))}
+                  />
+                )}
+              </View>
+            ))}
+          </View>
+        )}
       </Card>
       <View style={styles.section}>
         <Eyebrow>{t(store.uiLanguage, 'chooseLanguage').toUpperCase()}</Eyebrow>
@@ -249,7 +282,10 @@ export function SettingsScreen() {
         <Eyebrow>{t(store.uiLanguage, 'bibleTranslation').toUpperCase()}</Eyebrow>
         <View style={styles.options}>
           {translations.map((translation) => {
-            const enabled = translation.publicBuild || translation.developmentBuild;
+            const enabled =
+              translation.publicBuild &&
+              translation.redistributionAllowed &&
+              translation.contentAvailable;
             return (
               <Pressable
                 key={translation.id}
@@ -290,10 +326,31 @@ export function SettingsScreen() {
           })}
         </View>
       </View>
+      <View style={styles.section}>
+        <Eyebrow>{u('FEEDBACK & ACCESSIBILITY')}</Eyebrow>
+        <View style={styles.options}>
+          {feedbackOptions.map((option) => (
+            <View key={option.key} style={styles.feedbackOption}>
+              <Ionicons name={option.icon} size={22} color={colors.primary} />
+              <View style={styles.feedbackCopy}>
+                <Text style={styles.optionText}>{u(option.label)}</Text>
+                <Text style={styles.feedbackDetail}>{u(option.detail)}</Text>
+              </View>
+              <Switch
+                accessibilityLabel={u(option.label)}
+                value={store.feedbackSettings[option.key]}
+                onValueChange={(enabled) => store.setFeedbackSetting(option.key, enabled)}
+                trackColor={{ false: '#C8BEAA', true: '#A98BDE' }}
+                thumbColor={store.feedbackSettings[option.key] ? colors.primary : '#F4EFE5'}
+              />
+            </View>
+          ))}
+        </View>
+      </View>
       <Card style={styles.offline}>
         <Ionicons name="phone-portrait-outline" size={26} color={colors.mint} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.offlineTitle}>Offline-first</Text>
+          <Text style={styles.offlineTitle}>{u('Offline-first')}</Text>
           <Text style={styles.offlineText}>{t(store.uiLanguage, 'offline')}</Text>
         </View>
       </Card>
@@ -303,27 +360,27 @@ export function SettingsScreen() {
       </View>
       {!confirmReset ? (
         <Button
-          label="Reset local progress"
+          label={u('Reset local progress')}
           variant="ghost"
           onPress={() => setConfirmReset(true)}
         />
       ) : (
         <View style={styles.reset}>
           <Text style={styles.resetText}>
-            This removes local XP, streaks, mastery, and review history.
+            {u('This removes local XP, streaks, mastery, and review history.')}
           </Text>
           <Button
-            label="Confirm reset"
+            label={u('Confirm reset')}
             variant="danger"
             onPress={() => {
               store.resetProgress();
               setConfirmReset(false);
             }}
           />
-          <Button label="Cancel" variant="ghost" onPress={() => setConfirmReset(false)} />
+          <Button label={u('Cancel')} variant="ghost" onPress={() => setConfirmReset(false)} />
         </View>
       )}
-      <Text style={styles.version}>Scriptora private MVP · 0.1.0</Text>
+      <Text style={styles.version}>{u('Bibliavia private MVP')} · 0.1.0</Text>
     </ScrollView>
   );
 }
@@ -348,6 +405,17 @@ const styles = StyleSheet.create({
   authNotice: { fontSize: 11, lineHeight: 16, color: colors.muted },
   authError: { fontSize: 12, lineHeight: 17, color: colors.coral },
   userId: { fontSize: 10, color: colors.muted },
+  savedAccounts: { gap: 8, marginTop: 4 },
+  savedAccount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 9,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+  },
+  savedEmail: { color: colors.ink, fontSize: 12, fontWeight: '800' },
+  savedPlayerId: { color: colors.muted, fontSize: 9, marginTop: 2 },
   section: {
     gap: 10,
     padding: 14,
@@ -383,6 +451,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  feedbackOption: {
+    minHeight: 58,
+    paddingHorizontal: 13,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.white,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+  },
+  feedbackCopy: { flex: 1 },
+  feedbackDetail: { fontSize: 11, color: colors.muted, marginTop: 2 },
   selected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   disabled: { opacity: 0.48 },
   optionText: { fontWeight: '800', fontSize: 15, color: colors.inkSoft },

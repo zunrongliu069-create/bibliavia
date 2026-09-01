@@ -1,11 +1,15 @@
 import type { Verse } from '../types';
-
-const bookOrder: Record<Verse['bookId'], number> = { romans: 0, proverbs: 1 };
+import { canonicalBookIds } from '../data/content';
 
 export function learningSequence(items: Verse[]): Verse[] {
+  const legacyCurriculumOnly = items.every(
+    (verse) => verse.bookId === 'romans' || verse.bookId === 'proverbs',
+  );
+  const order = legacyCurriculumOnly ? ['romans', 'proverbs'] : canonicalBookIds;
+  const bookOrder = new Map(order.map((bookId, index) => [bookId, index]));
   return [...items].sort(
     (a, b) =>
-      bookOrder[a.bookId] - bookOrder[b.bookId] ||
+      (bookOrder.get(a.bookId) ?? order.length) - (bookOrder.get(b.bookId) ?? order.length) ||
       a.chapter - b.chapter ||
       a.verseStart - b.verseStart ||
       a.verseEnd - b.verseEnd,

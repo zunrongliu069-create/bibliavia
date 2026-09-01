@@ -1,20 +1,26 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, ProgressBar } from '../components/ui';
-import { translations, verses } from '../data/content';
+import { translations } from '../data/content';
 import { t } from '../lib/i18n';
-import { masteryPercent } from '../lib/scheduler';
-import { biblePassageUrl, parseBibleReference } from '../lib/bibleLinks';
+import { uiText } from '../lib/uiText';
 import { colors, radius } from '../theme';
 import type { Verse } from '../types';
 import { useAppStore } from '../store/AppStore';
-import { ReadingPlansView } from './ReadingPlansView';
 
-export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) {
+export function LibraryScreen({
+  onStart,
+  initialPassage,
+  onBack,
+}: {
+  onStart: (verse: Verse) => void;
+  initialPassage?: { label: string; verses: Verse[] } | null;
+  onBack?: () => void;
+}) {
   const store = useAppStore();
-  const [mode, setMode] = useState<'read' | 'memorize'>('read');
-  const [bibleOpen, setBibleOpen] = useState(false);
+  const u = (text: string) => uiText(store.uiLanguage, text);
+  const [bibleOpen] = useState(true);
   const [showBibleText, setShowBibleText] = useState(false);
   const [bookId, setBookId] = useState<Verse['bookId']>('romans');
   const [chapter, setChapter] = useState(1);
@@ -23,7 +29,7 @@ export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) 
   const [speaking, setSpeaking] = useState(false);
   const [planPassage, setPlanPassage] = useState<{ label: string; verses: Verse[] } | null>(null);
   const translation = translations.find((item) => item.id === store.translationId);
-  const available = verses.filter((item) => item.translationId === store.translationId);
+  const available = store.availableVerses;
   const books = useMemo(
     () =>
       Array.from(
@@ -67,14 +73,17 @@ export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) 
     chapter === 1 &&
     chapterVerses.length === 32;
   useEffect(() => {
-    const first = verses.find((verse) => verse.translationId === store.translationId);
+    const first = available[0];
     if (first) {
       setBookId(first.bookId);
       setChapter(first.chapter);
       setSelectedVerse(first.verseStart);
       setShowBibleText(false);
     }
-  }, [store.translationId]);
+  }, [available, store.translationId]);
+  useEffect(() => {
+    if (initialPassage) setPlanPassage(initialPassage);
+  }, [initialPassage]);
   useEffect(
     () => () => {
       if (Platform.OS === 'web') globalThis.speechSynthesis?.cancel();
@@ -103,16 +112,6 @@ export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) 
     setSelectedVerse(first?.verseStart ?? 1);
     setShowBibleText(false);
   };
-  const toggleBible = () => {
-    setMode('read');
-    setBibleOpen((open) => {
-      if (open) {
-        setShowBibleText(false);
-        return false;
-      }
-      return true;
-    });
-  };
   const toggleChapterAudio = () => {
     if (Platform.OS !== 'web') return;
     const synth = globalThis.speechSynthesis;
@@ -135,38 +134,25 @@ export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) 
       synth.speak(utterance);
     });
   };
-  const openPlanReference = (canonicalReference: string, displayReference: string) => {
-    const target = parseBibleReference(canonicalReference);
-    const local = target?.campaignId
-      ? available.filter(
-          (verse) =>
-            verse.bookId === target.campaignId &&
-            verse.chapter === target.chapter &&
-            (!target.verseStart || verse.verseStart >= target.verseStart) &&
-            (!target.verseEnd || verse.verseStart <= target.verseEnd),
-        )
-      : [];
-    if (local.length) {
-      setPlanPassage({ label: displayReference, verses: local });
-      return;
-    }
-    const url = biblePassageUrl(canonicalReference, store.translationId);
-    if (url) Linking.openURL(url).catch(() => undefined);
-  };
   if (planPassage)
     return (
       <ScrollView contentContainerStyle={[styles.page, styles.planReader]}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t(store.uiLanguage, 'backToPlans')}
-          onPress={() => setPlanPassage(null)}
+          accessibilityLabel={u('Back to Path')}
+          onPress={() => (onBack ? onBack() : setPlanPassage(null))}
           style={styles.readerBack}
         >
           <Ionicons name="arrow-back" size={21} color={colors.ink} />
-          <Text style={styles.readerBackText}>{t(store.uiLanguage, 'backToPlans')}</Text>
+          <Text style={styles.readerBackText}>{u('Back to Path')}</Text>
         </Pressable>
         <Text style={styles.chapterTitle}>{planPassage.label}</Text>
         <Text style={styles.subtitle}>{translation?.name}</Text>
+        {!planPassage.verses.length && (
+          <Card>
+            <Text style={styles.subtitle}>{u('Bible text unavailable for this version.')}</Text>
+          </Card>
+        )}
         <View style={styles.passage}>
           {planPassage.verses.map((verse) => (
             <View key={verse.id} style={styles.readVerse}>
@@ -204,6 +190,17 @@ export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) 
     );
   return (
     <ScrollView contentContainerStyle={[styles.page, calm && styles.calmPage]}>
+      {onBack && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={u('Back to Path')}
+          onPress={onBack}
+          style={styles.readerBack}
+        >
+          <Ionicons name="arrow-back" size={21} color={colors.ink} />
+          <Text style={styles.readerBackText}>{u('Back to Path')}</Text>
+        </Pressable>
+      )}
       <View
         style={[
           styles.header,
@@ -219,7 +216,7 @@ export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) 
       >
         <View style={{ flex: 1 }}>
           <Text style={[styles.title, !calm && { color: colors.white }]}>
-            {translation?.name ?? 'Bible'}
+            {translation?.name ?? u('Bible')}
           </Text>
           <Text style={[styles.subtitle, !calm && { color: '#D8CFEB' }]}>
             {available.length} verified verses · {t(store.uiLanguage, 'readingProgress')}{' '}
@@ -232,10 +229,6 @@ export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) 
           accessibilityState={{ checked: calm }}
           onPress={() =>
             setCalm((old) => {
-              if (!old) {
-                setMode('read');
-                setBibleOpen(true);
-              }
               return !old;
             })
           }
@@ -249,31 +242,13 @@ export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) 
       </View>
       {!calm && (
         <>
-          <View style={styles.switcher}>
-            <ModeButton
-              icon="book"
-              label={t(store.uiLanguage, 'readBible')}
-              active={mode === 'read' && bibleOpen}
-              onPress={toggleBible}
-            />
-            <ModeButton
-              icon="sparkles"
-              label={t(store.uiLanguage, 'memorize')}
-              active={mode === 'memorize'}
-              onPress={() => {
-                setMode('memorize');
-                setBibleOpen(false);
-                setShowBibleText(false);
-              }}
-            />
-          </View>
           <ProgressBar
             value={available.length ? readCount / available.length : 0}
             color={colors.mint}
           />
         </>
       )}
-      {mode === 'read' && bibleOpen && (
+      {bibleOpen && (
         <View style={styles.bibleNavigator}>
           <View style={styles.selectorHeader}>
             <Ionicons name="book-outline" size={20} color={colors.primary} />
@@ -378,12 +353,11 @@ export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) 
           />
         </View>
       )}
-      {mode === 'read' && !calm && <ReadingPlansView compact onOpenReference={openPlanReference} />}
-      {mode === 'read' && showBibleText && (
+      {showBibleText && (
         <>
           <View style={styles.chapterHeading}>
             <Text style={styles.chapterTitle}>
-              {chapterVerses[0]?.bookName ?? 'Romans'} {chapter}
+              {chapterVerses[0]?.bookName ?? u('Romans')} {chapter}
             </Text>
             {hasEnglishRomansAudio && (
               <Pressable
@@ -459,80 +433,12 @@ export function LibraryScreen({ onStart }: { onStart: (verse: Verse) => void }) 
           })}
         </>
       )}
-      {mode === 'memorize' &&
-        available.map((verse) => {
-          const mastery = store.progress.mastery[verse.id];
-          const strength = masteryPercent(mastery) / 100;
-          return (
-            <Pressable
-              key={verse.id}
-              accessibilityRole="button"
-              accessibilityLabel={verse.reference}
-              onPress={() => onStart(verse)}
-            >
-              <Card style={styles.verseCard}>
-                <View style={styles.row}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.reference}>{verse.reference}</Text>
-                    <Text numberOfLines={2} style={styles.text}>
-                      {verse.text}
-                    </Text>
-                  </View>
-                  <Ionicons name="play-circle" size={25} color={colors.primary} />
-                </View>
-                <View style={styles.strength}>
-                  <Text style={styles.stage}>{mastery?.stage ?? 'new'}</Text>
-                  <Text style={styles.percent}>{Math.round(strength * 100)}% mastery</Text>
-                </View>
-                <ProgressBar
-                  value={strength}
-                  color={strength > 0.75 ? colors.mint : colors.primary}
-                />
-                <View style={styles.dual}>
-                  <Text style={styles.dualText}>
-                    Memory {Math.round((mastery?.recallStrength ?? 0) * 100)}%
-                  </Text>
-                  <Text style={styles.dualText}>
-                    Understanding {Math.round((mastery?.understandingStrength ?? 0) * 100)}%
-                  </Text>
-                </View>
-              </Card>
-            </Pressable>
-          );
-        })}
       {!available.length && (
         <Card>
-          <Text style={styles.empty}>
-            This translation is configured but contains no distributable text yet.
-          </Text>
+          <Text style={styles.empty}>{u('Bible text unavailable for this version.')}</Text>
         </Card>
       )}
     </ScrollView>
-  );
-}
-
-function ModeButton({
-  icon,
-  label,
-  active,
-  onPress,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected: active }}
-      onPress={onPress}
-      style={[styles.switch, active && styles.switchActive]}
-    >
-      <Ionicons name={icon} size={18} color={active ? colors.white : colors.primary} />
-      <Text style={[styles.switchText, active && styles.switchTextActive]}>{label}</Text>
-    </Pressable>
   );
 }
 

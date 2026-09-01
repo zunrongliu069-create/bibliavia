@@ -1,24 +1,48 @@
 # PROJECT HANDOFF
 
+## 0. UPDATED PRODUCT DIRECTION — AUTHORITATIVE
+
+- **Purpose:** Bibliavia is a completely free, gamified Bible app where Reading, Memorization, Review and Challenge make engaging with Scripture rewarding.
+- **Path:** An optional goal or plan ranging from one verse to a year-long reading or memorization plan.
+- **Beats:** Optional smaller milestones inside larger Paths, used only when they improve progression.
+- **Progression:** Every activity contributes to Paths; Reading and Memorization are equally valid routes.
+- **Diminishing returns:** Repeating the same activity on the same Beat during one day gives less progression, but never zero.
+- **Rewards:** XP, Gold, Heroes and extremely rare Fragments scale with actual effort, not merely the number of Paths.
+- **Heroes:** Must change how the app is played instead of providing only simple stat bonuses.
+- **Fragments:** Extremely rare gameplay rewards that can never be purchased.
+- **Path scope:** Paths may be user-created or curated. Larger curated Paths may have richer narrative structure and more exclusive rewards.
+- **Navigation:** Home focuses on what the user can do now; Path shows where the user is going.
+- **Meta-progression:** The overall journey is expressed through completed Paths, Scripture, collection and milestones.
+- **Discovery:** Larger Paths may use visual fog/discovery and teaser future sections.
+- **Extensibility:** The Path system should later support branching, events, quests and deeper gameplay without building those systems now.
+- **Audio and motion:** Warm, organic, historical and calm. Everyday feedback is minimal; major rewards carry more audiovisual weight. Animations are short, skippable and reusable, while rare Fragment reveals may be more distinctive.
+- **Feedback:** Correct, Wrong and Partial Success are clearly distinct, and failure never feels like wasted time.
+- **Accessibility:** Audio, haptics and animation are independently controllable; Reduce Motion is supported; color is never the only feedback signal.
+- **Core philosophy:** **Scripture is the content, activities are the game, Paths are the journey, and rewards, animation and sound reinforce motivation.**
+- **Business model:** **100% free — no premium features, paid slots or purchasable Fragments.**
+
 ## 1. PROJECT
 
-- App name: Scriptora.
-- Purpose: Game-like Bible reading and verse memorization optimized for long-term recall.
+- App name: Bibliavia.
+- Purpose: Free, game-like Bible reading, memorization, review and challenges with multiple equally valid progression routes.
 - Target platforms: Web, iOS, Android via Expo/React Native. Current prototype is primarily tested on web.
 - Tech stack: Expo 57, React 19, React Native 0.86, TypeScript, React Native Web, AsyncStorage, Vitest.
 
 ## 2. CORE PRODUCT
 
-- Core user loop: Learn a verse -> retrieve it through short exercises -> full/spoken recall -> receive XP/chest rewards -> repeat when due -> increase durable mastery -> unlock characters.
-- Main value proposition: Help users retain Scripture long-term; rewards reinforce real retrieval practice, not passive recognition.
-- Target user: Bible readers who want brief, motivating, multilingual memorization sessions.
+- Core user loop: Choose or continue a Path -> complete Reading, Memorization, Review or Challenge activities -> progress through optional Beats -> receive effort-scaled rewards -> continue the broader Scripture journey.
+- Main value proposition: Make sustained engagement with Scripture motivating while preserving meaningful learning and durable recall.
+- Target user: Bible readers who want brief, motivating, multilingual reading and memorization sessions.
 
 ## 3. FINAL PRODUCT DECISIONS
 
-- **FINAL:** Long-term verse retention is priority 1; retrieval and spacing outrank gamification and passive recognition.
-- **FINAL:** App name is Scriptora.
+- **FINAL:** Reading and Memorization are equally valid Path-progression routes; within memorization, durable recall still requires retrieval and spacing.
+- **FINAL:** App name is Bibliavia.
 - **FINAL:** UI is game-like and cohesive: deep purple, gold, mint, cream; detail level between Duolingo and Clash Royale.
-- **FINAL:** Path is the primary lesson journey; lessons also start from Today.
+- **FINAL:** Paths are optional goals/plans; Home emphasizes what can be done now, while Path communicates where the user is going.
+- **FINAL:** Same-day repetition of one activity on one Beat has diminishing but never zero progression.
+- **FINAL:** Heroes should alter play patterns, not merely add simple stat bonuses.
+- **FINAL:** Fragments are extremely rare gameplay-only rewards and can never be purchased.
 - **FINAL:** Lessons begin at Romans 1 and Proverbs 1 and advance to the next verse, never repeat the completed verse.
 - **FINAL:** A user may stop after any stage without failure; progress is saved and resumes later.
 - **FINAL:** Only full typed recall or spoken recall can establish durable mastery and long intervals.
@@ -30,15 +54,24 @@
 - **FINAL:** All 20 character cards start locked; David is a collectible card, not a guide/mascot.
 - **FINAL:** Shard Shop shows exactly three equally rotated mixed-rarity offers.
 - **FINAL:** Show All Collection sorts Common -> Rare -> Epic -> Legendary.
-- **FINAL:** Read Bible and Reading Plans share one screen; Bible text appears only after Choose Bible Passage and book -> chapter -> verse selection.
+- **FINAL:** Verses is not a separate main destination. Reading Plans are Reading Paths, while free Bible browsing is a simple reader entered from Path.
+- **FINAL:** Paths declare Reading, Memorization or Mixed intent and prioritize one smart next action. Completion and future retention mastery remain separate concepts.
+- **FINAL:** Bibliavia ID is guest-first and free. MVP scope is cloud save, Guest-to-ID linking, email code, cross-device login, account switching and a public Player ID.
 - **FINAL:** UI language and Bible translation are independent settings.
 - **FINAL:** Cursor must remain visible on web.
-- **FINAL:** Free-to-play; no pay-to-win mechanics.
+- **FINAL:** The app is 100% free, with no premium features, paid slots, pay-to-win mechanics or purchasable Fragments.
 
 ## 4. CURRENTLY IMPLEMENTED
 
-- Five-tab app shell: Today, Path, Verses, Bible Collection, Settings.
+- Four-tab app shell: Today, Path, Bible Collection, Settings. The simplified Bible reader is nested under Path.
 - Persistent local user state with migration support.
+- Generalized Path/Beat system with curated and user-created Paths, optional Beats, configurable activity/quality rewards, daily per-activity/per-Beat diminishing returns, partial Challenge progress, overflow completion and branch-ready next-node metadata.
+- Reading, Memorization, Review and Challenge completion all feed Path progression. Beat/Path completion awards effort-scaled XP/Gold; only substantial curated Paths can reveal a rare, non-purchasable Fragment.
+- Shared typed feedback events distinguish Correct, Wrong, Partial, Path progress, Beat/Path completion and Fragment reveals. Generated local audio, native haptics, reusable animations and independently persisted controls are implemented.
+- Equipped Heroes now change Review/Challenge sessions through Guided Hint, Mistake Shield and Combo Guard mechanics; duplicate mechanics do not stack as percentage multipliers. Completed character sets can add a synergy only while a set member is equipped.
+- Fragments start at zero and are absent from routine goals and achievements. Current sources are substantial curated Path completion, each level-60 milestone and final Period Mastery; they cannot be bought.
+- Typed word-level answer feedback aligns correct, minor-spelling, missing, extra and changed words for Latin and Chinese text. Review/Challenge shows symbol-and-color diffs plus localized, mode-specific guidance.
+- Paths now expose Reading/Memorization/Mixed type, a single smart next action, resume summary, compact pre-start preview, reusable milestones/discoveries, a six-Beat progress window and a future-facing retention-mastery state.
 - Today dashboard: daily goal, quests, achievements, at-risk verses, normal lesson and five-item Quick Practice.
 - Romans/Proverbs Path with chapter selection and playable lesson nodes.
 - Ten-exercise, three-stage lessons; automatic grading, optional grade override, tolerant text comparison, resume, next-verse progression.
@@ -47,17 +80,17 @@
 - Twenty locked collectible Bible characters; filters, details, target selection and daily Shard Shop.
 - Read Bible passage selector/reader and eight functioning reading plans.
 - Four UI languages and four translation records with license metadata.
+- One shared local `BibleVersion -> Book -> Chapter -> Verse` content layer for Reading, Memorization, Review, Challenge and Paths. WEB, CUV-S and CUV-T contain all 66 books; B2000 is configured but disabled and contains no text.
 - Browser speech recognition for Speak; browser TTS remains in the reader but is unreliable.
-- Unit tests for core learning, XP, levels, rewards, shop and related logic. Last verified status: 57 tests passed; TypeScript passed.
+- Unit tests for core learning, XP, levels, rewards, shop, Paths, feedback and Bible content. Last verified status: 25 files / 96 tests passed; formatting and TypeScript passed.
 
 ## 5. CURRENT UI / UX
 
 - Shared HUD: Current Streak, Days Active, XP/level and gold. No global HP.
 - Today: dense game dashboard with daily goal (50 XP), quests, coach/status, Quick Practice, achievements and due/at-risk verses.
-- Path: illustrated world, campaign/chapter controls, lesson nodes and current position; tapping a node enters a lesson.
-- Verses: Reading Plans plus collapsed Read Bible. Selecting Read Bible reveals book/chapter/verse controls; opening shows text, reading actions and Memorize.
+- Path: one prioritized next action, resume position/progress, compact preview, milestones, active Path cards, Reading Paths, free Bible browsing and secondary Reading/Memorization/Challenge actions on demand.
 - Collection: compact locked cards, rarity filters, character detail/target selection and three-offer shop.
-- Settings: language, translation/license information and reset controls.
+- Settings: language, translation/license information, independent sound/ambient/haptics controls, Reduce Motion and reset controls.
 - Lesson: consistent adventure theme from intro through exercises, stage checkpoints, chest and next verse. Primary continue action should remain visible.
 - Stage checkpoints are positive exits: “progress saved,” earned XP and option to finish or continue.
 - Word Order: tap available words to add; tap placed words to remove; Clear resets.
@@ -65,30 +98,31 @@
 
 ## 6. GAME SYSTEMS
 
-| System | Current exact rule |
-|---|---|
-| XP | Daily goal 50. Lesson uses fixed successful-question XP `[4,5,11,3,3,5,4,3,5,7]`, giving cumulative stage totals 20/35/50. A failed lesson answer gives 0 fixed XP. Quick Practice gives 5 XP per successful item, maximum 25. Other reviews use `calculateXp`: failed/Again/accuracy < 0.5 = 2; base 12 for new mastery else 8; recall/speak +8; context/contextChoice/initials/keywords +4; blanks/moreBlanks/reorder/choice/finish/sentenceCheck/match +2; age bonus `min(10,floor(stabilityDays/7))`; perfect +6; hints -3 each; Easy x1.15, Hard x0.75; minimum 3 on success. |
-| HP | Three lesson hearts, visible only inside lessons. Unsuccessful answer removes one, minimum 0. A stage continuation restores one, maximum 3. Reaching 0 currently does not terminate the lesson. |
-| Lessons | Ten questions. Stage 1 = Q1-3 Learn; Stage 2 = Q4-7 Practice; Stage 3 = Q8-10 Master. Stop after any stage, save index, resume later. Every grade advances. Success requires grade != Again and accuracy >= 0.55. |
-| Chest levels | Tiers 1-5: Wood, Bronze, Scroll, Royal, Glory. Base tier after stage 1/2/3 is 1/2/3. |
-| Chest progression | Tap closed chest exactly 3 times. Each tap spins/animates and independently upgrades one tier, max 5. Chance per tap = `0.20 + accuracy*0.45` (20-65%), deterministically seeded. No duplicate claim for the same stage reward. |
-| Gold | Chest amounts by tier: 12/20/32/50/80. Level rewards: `20 + level*5`. Spend 50 gold for 5 shards in the shop. No purchases/IAP. |
-| Character shards | Chest shards by tier: 4/7/12/18/30, awarded to selected target. Shop: +5 for 50 gold. |
-| Characters | 20 cards, all initially locked. Unlock costs: Common 40, Rare 60, Epic 80, Legendary 100 shards. |
-| Character levels | Level 0 while locked; level 1 at unlock cost; +1 per additional full unlock-cost block; cap 4. Reading-based upgrade requirements are not implemented. |
-| User levels | XP threshold for level L: `100*(L-1) + 25*(L-1)^2`. From level 2, claim gold `20 + 5L`; every fifth level also gives 10 target-character shards. Titles at levels 1/5/10/20/35: Beginner, Verse Learner, Scripture Walker, Memory Master, Bible Scholar. |
-| Days Active | Count of unique local calendar dates containing practice or recorded reading; non-consecutive. |
-| Streaks | Current Streak continues if active yesterday, stays unchanged for repeated activity today, otherwise resets to 1. Longest Streak is stored. No Recall Streak. |
-| Achievements | Eight: First Verse (1 successful full/spoken recall); Ten Verses (10 recalled verses); Perfect Recall (>=98%, no hints, full/spoken); Ten Perfect; First Character; Seven Active Days; Chapter Explorer (all locally available verses in a chapter read); Scripture Scholar (1000 XP). |
-| Challenges | Daily quests: review 3 items; one perfect hint-free full/spoken recall; learn 1 new verse. Path has a Skip Ahead control but no real placement test. Boss/chapter challenges are not fully implemented. |
-| Mastery | Display percent = 15% recognition + 85% recall, decayed by retrievability; capped at 49% until first successful full/spoken recall. Stages: New (0 full recalls), Learning (<3-day stability), Familiar (<14), Strong (<60), Mastered (>=60). |
+| System            | Current exact rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| XP                | Daily goal 50. Lesson uses fixed successful-question XP `[4,5,11,3,3,5,4,3,5,7]`, giving cumulative stage totals 20/35/50. A failed lesson answer gives 0 fixed XP. Quick Practice gives 5 XP per successful item, maximum 25. Other reviews use `calculateXp`: failed/Again/accuracy < 0.5 = 2; base 12 for new mastery else 8; recall/speak +8; context/contextChoice/initials/keywords +4; blanks/moreBlanks/reorder/choice/finish/sentenceCheck/match +2; age bonus `min(10,floor(stabilityDays/7))`; perfect +6; hints -3 each; Easy x1.15, Hard x0.75; minimum 3 on success. |
+| HP                | Three lesson hearts, visible only inside lessons. Unsuccessful answer removes one, minimum 0. A stage continuation restores one, maximum 3. Reaching 0 currently does not terminate the lesson.                                                                                                                                                                                                                                                                                                                                                                                    |
+| Lessons           | Ten questions. Stage 1 = Q1-3 Learn; Stage 2 = Q4-7 Practice; Stage 3 = Q8-10 Master. Stop after any stage, save index, resume later. Every grade advances. Success requires grade != Again and accuracy >= 0.55.                                                                                                                                                                                                                                                                                                                                                                  |
+| Chest levels      | Tiers 1-5: Wood, Bronze, Scroll, Royal, Glory. Base tier after stage 1/2/3 is 1/2/3.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Chest progression | Tap closed chest exactly 3 times. Each tap spins/animates and independently upgrades one tier, max 5. Chance per tap = `0.20 + accuracy*0.45` (20-65%), deterministically seeded. No duplicate claim for the same stage reward.                                                                                                                                                                                                                                                                                                                                                    |
+| Gold              | Chest amounts by tier: 12/20/32/50/80. Level rewards: `20 + level*5`. Spend 50 gold for 5 shards in the shop. No purchases/IAP.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Character shards  | Chest shards by tier: 4/7/12/18/30, awarded to selected target. Shop: +5 for 50 gold.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Characters        | 20 cards, all initially locked. Unlock costs: Common 40, Rare 60, Epic 80, Legendary 100 shards.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Character levels  | Level 0 while locked; level 1 at unlock cost; +1 per additional full unlock-cost block; cap 4. Reading-based upgrade requirements are not implemented.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| User levels       | XP threshold for level L: `100*(L-1) + 25*(L-1)^2`. From level 2, claim gold `20 + 5L`; every fifth level also gives 10 target-character shards. Titles at levels 1/5/10/20/35: Beginner, Verse Learner, Scripture Walker, Memory Master, Bible Scholar.                                                                                                                                                                                                                                                                                                                           |
+| Days Active       | Count of unique local calendar dates containing practice or recorded reading; non-consecutive.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Streaks           | Current Streak continues if active yesterday, stays unchanged for repeated activity today, otherwise resets to 1. Longest Streak is stored. No Recall Streak.                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Achievements      | Eight: First Verse (1 successful full/spoken recall); Ten Verses (10 recalled verses); Perfect Recall (>=98%, no hints, full/spoken); Ten Perfect; First Character; Seven Active Days; Chapter Explorer (all locally available verses in a chapter read); Scripture Scholar (1000 XP).                                                                                                                                                                                                                                                                                             |
+| Challenges        | Daily quests: review 3 items; one perfect hint-free full/spoken recall; learn 1 new verse. Path has a Skip Ahead control but no real placement test. Boss/chapter challenges are not fully implemented.                                                                                                                                                                                                                                                                                                                                                                            |
+| Mastery           | Display percent = 15% recognition + 85% recall, decayed by retrievability; capped at 49% until first successful full/spoken recall. Stages: New (0 full recalls), Learning (<3-day stability), Familiar (<14), Strong (<60), Mastered (>=60).                                                                                                                                                                                                                                                                                                                                      |
 
 Automatic grade: accuracy < 0.55 = Again; accuracy < 0.82 or at least 2 hints = Hard; accuracy >= 0.98, no hints and fast enough = Easy; otherwise Good. Read recommends Good. User may override.
 
 ## 7. BIBLE / LEARNING SYSTEM
 
 - Bible reading: choose translation, book, chapter and starting verse; open passages are grouped into at most six verses. Users can mark read or start memorization.
-- Passage structure: local `Verse` records contain translation/book/chapter/verse range/reference/language/text/source. Path curriculum groups verse ranges into chapter lessons.
+- Content structure: license-gated `BibleVersion` records own Books, Chapters and Verses. `getVerse`, `getPassage` and `getReferencedPassage` are the only activity-facing lookup layer; mastery is created lazily by canonical version/book/chapter/verse ID.
+- Paths and Beats store passage references, never Bible text. User-created Paths pin a selected Bible version, book, chapter and verse range; curated Paths use the user's active version.
 - Memorization sequence: Read -> Finish sentence (2 choices) -> First letters -> Choose word -> Exact/changed sentence -> Word Order -> Match references/openings -> Choose next verse -> Speak -> Full Recall.
 - Word Order: shuffled tokens; add, remove or clear; no full typing.
 - Fill-in-the-blank: only 2-3 missing words, answered in order.
@@ -103,16 +137,16 @@ Automatic grade: accuracy < 0.55 = Again; accuracy < 0.82 or at least 2 hints = 
   - Due queue sorts lowest retrievability first, then lowest recall strength.
   - Existing state is migrated from actual review history under retention model version 1; previously inflated mastery may decrease.
 - Understanding: Understand and Context Choice update understanding strength; semantic comprehension content is currently lightweight/static.
-- Reading plans implemented: John 21 days, Mark 16, New Testament 90 (all 260 chapters, usually 3/day), Comfort 7, Prayer 14, Courage 21, Wisdom/Proverbs 31, With Jesus 30. Completing a day gives 5 XP. Missing local passages use an external Bible link.
+- Reading plans implemented: John 21 days, Mark 16, New Testament 90 (all 260 chapters, usually 3/day), Comfort 7, Prayer 14, Courage 21, Wisdom/Proverbs 31, With Jesus 30. Every scheduled WEB/CUV passage opens locally; completing a day gives 5 XP.
 - Audio: listening exercises are disabled. Reader TTS uses browser `speechSynthesis`; Speak uses browser `SpeechRecognition`/`webkitSpeechRecognition`. Both are browser-dependent and not production-ready.
 - Languages: UI supports English, Swedish, Simplified Chinese and Traditional Chinese. Initial setting: Simplified Chinese.
-- Translations/licensing: WEB English is public domain; CUV-S/CUV-T source editions are marked public domain but jurisdiction/release status must be reverified; Bibel 2000 requires Svenska Bibelsällskapet permission and is development-only (`publicBuild:false`). Initial translation: CUV-S.
-- Local content is incomplete: Romans 1 and Proverbs 1 are the primary populated chapters, plus a few extra verses; full-Bible plans often depend on external links.
+- Translations/licensing: official eBible.org edition pages declare WEB, CUV-S and CUV-T public domain; local metadata records source, verification date, redistribution flag and content availability. B2000 requires Svenska Bibelsällskapet permission, has `publicBuild:false`, `redistributionAllowed:false`, no bundled text and cannot be selected. Initial translation: CUV-S.
+- Local content: WEB has 31,098 non-empty verses; CUV-S and CUV-T each have 31,021 verses across all 66 books. Empty source verse markers are not exposed as activities.
 
 ## 8. AI FEATURES
 
 - Implemented AI: none. Adaptive grading, scheduling, shop rotation and rewards are deterministic local algorithms, not AI services.
-- Planned: mistake-specific feedback and word-level comparison; better multilingual speech grading, including Chinese homophones/pinyin.
+- Planned: better multilingual speech grading, including Chinese homophones/pinyin.
 - OPTIONAL/FUTURE: generated comprehension questions/distractors only with theological/editorial review and a defined content policy.
 
 ## 9. SOCIAL FEATURES
@@ -146,7 +180,7 @@ Automatic grade: accuracy < 0.55 = Again; accuracy < 0.82 or at least 2 hints = 
 - Storage: AsyncStorage; reviews capped at 500, reward history at 100. Character/path images bundled locally.
 - Important packages: Expo, React/React Native, AsyncStorage, Expo Localization/Font/StatusBar, Safe Area Context, Expo Vector Icons, Vitest.
 - Environment variables: none currently.
-- Build/deployment: `npm start`, `npm run web|ios|android`, `npm run typecheck`, `npm test`. Local web commonly runs at `http://localhost:4173`; no production hosting/release pipeline is configured.
+- Build/deployment: `npm start`, `npm run web|ios|android`, `npm run typecheck`, `npm test`. Bibliavia web uses `http://localhost:8081`. Port 8082 belongs to Open WebUI and must never be used for Bibliavia. Before starting another Expo process, first open or check the existing server on port 8081. No production hosting/release pipeline is configured.
 
 ## 12. FILE STRUCTURE
 
@@ -165,12 +199,12 @@ src/
     CollectionScreen.tsx        Cards, details, targeting and Shard Shop
     SettingsScreen.tsx          UI language, translation/licenses, reset
   data/
-    content.ts                  Translation metadata and local verse registry
+    content.ts                  License-gated shared BibleVersion lookup API
     curriculum.ts               Romans/Proverbs Path curriculum
     readingPlans.ts             Eight localized plan definitions
     characters.ts / chests.ts   Collection and chest assets/rules
-    generated/                  Generated CUV-S content
-    licensed/                   Development-only licensed content
+    generated/                  Generated full WEB/CUV-S/CUV-T content
+    licensed/                   Instructions only; no B2000 text
   lib/
     scheduler.ts                Retention scheduling/mastery
     exercise.ts / tokenize.ts   Exercise generation and answer comparison
@@ -180,9 +214,9 @@ src/
     rewards.ts / shardShop.ts   Chest rewards/upgrades and daily shop
     achievements.ts             Achievement progress
     learningSequence.ts         Verse ordering/next verse
-    bibleLinks.ts / i18n.ts     External passage links/localized copy
+    bibleLinks.ts / i18n.ts     Canonical passage reference parser/localized copy
   components/ui.tsx             Shared UI components
-  theme.ts                      Scriptora design tokens
+  theme.ts                      Bibliavia design tokens
 assets/                         Character, chest and Path artwork
 docs/                           Product/design notes and audits
 ```
@@ -195,7 +229,7 @@ Core logic tests are colocated as `src/**/*.test.ts`.
 - Persisted `StoredState` contains settings plus `UserProgress` maps/arrays:
   - Settings: UI language, translation and related preferences.
   - Progress: retention model version, XP, gold, current/longest streak, unique active dates, last practice date.
-  - Navigation: active campaign, Path chapter, lesson progress/index.
+  - Navigation: active campaign, Path chapter, lesson progress/index, generalized Path states and active Path IDs.
   - Learning: mastery keyed by verse ID and review-event history.
   - Reading: read verse IDs, active reading plan ID and per-plan/day progress.
   - Collection: character shards keyed by character ID, active shard target.
@@ -206,40 +240,41 @@ Core logic tests are colocated as `src/**/*.test.ts`.
 
 ## 14. CURRENT TODO
 
-| Priority | Work |
-|---|---|
-| P0 | Add deterministic 60-day retention simulation/integration tests covering due selection, full recall, lapse, decay, stage exits, persistence and next-verse flow; fix any exposed scheduler errors. |
-| P0 | Create a clean version-control baseline before large edits; current working tree files are untracked. Do not discard user files. |
-| P0 | Prevent Bibel 2000 from entering any public/release bundle until written digital permission exists; reverify CUV release status. |
-| P1 | Add word-level answer diff and localized, mode-specific mistake feedback. |
-| P1 | Replace Path's direct Skip Ahead with a real recall placement challenge and separately label skipped vs mastered content. |
-| P1 | Complete local Bible data/import pipeline so every reading-plan reference opens in-app text rather than an external fallback. |
-| P1 | Define and implement character reading/reference quest requirements without changing current rarity/cost rules without approval. |
-| P1 | Add end-to-end tests for every button and the complete Today/Path -> lesson -> checkpoint -> chest -> next verse flow. |
-| P1 | Fix narrow-screen HUD truncation and keep result/continue actions visible; perform accessibility review. |
-| P2 | Replace unreliable browser TTS/STT with licensed/cross-platform audio and speech services, then restore listening exercises. |
-| P2 | Implement actual boss/chapter challenges and improve Path progress semantics. |
-| P2 | Split the single large store and state blob into modular domains before backend/cloud sync work. |
-| P2 | Configure production build, hosting, monitoring and release checks. |
-| P3 | Museum, Skill Tree and approved social features after core retention is validated. |
+| Priority | Work                                                                                                                                                             |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Done     | Deterministic 60-day retention integration tests now cover due selection, full recall, lapse recovery, decay, stage exits, JSON persistence and next-verse flow. |
+| P0       | Create a clean version-control baseline before large edits; the working tree has extensive uncommitted tracked and untracked work. Do not discard user files.    |
+| P0       | Prevent Bibel 2000 from entering any public/release bundle until written digital permission exists; reverify CUV release status.                                 |
+| Done     | Define unified Path/Beat state and progression across Reading, Memorization, Review and Challenge, including same-day diminishing returns that never reach zero. |
+| Done     | Connect Reading, Memorization, Review and Challenge completion flows to generalized Path progression and surface typed feedback events.                        |
+| Done     | Reconcile current characters/shards with transformative Heroes and extremely rare, gameplay-only, non-purchasable Fragments before expanding the economy.        |
+| Done     | Add word-level answer diff and localized, mode-specific mistake feedback.                                                                                        |
+| P1       | Replace Path's direct Skip Ahead with a real recall placement challenge and separately label skipped vs mastered content.                                        |
+| Done     | Complete the shared local Bible data/import pipeline so every WEB/CUV reading-plan reference opens in-app instead of using an external fallback.                    |
+| P1       | Define and implement character reading/reference quest requirements without changing current rarity/cost rules without approval.                                 |
+| P1       | Add end-to-end tests for every button and the complete Today/Path -> lesson -> checkpoint -> chest -> next verse flow.                                           |
+| P1       | Keep result/continue actions visible and perform a full keyboard, screen-reader, text-scaling and contrast accessibility review.                                    |
+| Done     | Add separate audio, ambient, haptics and Reduce Motion controls plus non-color-only, skippable feedback.                                                            |
+| P2       | Replace unreliable browser TTS/STT with licensed/cross-platform audio and speech services, then restore listening exercises.                                     |
+| P2       | Implement actual boss/chapter challenges and improve Path progress semantics.                                                                                    |
+| P2       | Split the single large store and state blob into modular domains before backend/cloud sync work.                                                                 |
+| P2       | Configure production build, hosting, monitoring and release checks.                                                                                              |
+| P3       | Museum, Skill Tree and approved social features after core retention is validated.                                                                               |
 
 ## 15. KNOWN BUGS / PROBLEMS
 
-- Path Skip Ahead is chapter selection, not the recall challenge implied by its UI.
-- Local Scripture corpus is incomplete; many reading-plan entries leave the app through external links.
 - Browser TTS and speech recognition vary by browser/platform; listening remains disabled and Speak may fail.
 - Speech error/fallback copy contains hard-coded English in at least one path.
-- No word-level diff explains which words caused a tolerant recall mismatch.
-- HUD labels can truncate on narrow screens; Today can feel visually dense; some secondary text/controls may be too small or low contrast.
+- Today can feel visually dense; some secondary text/controls may be too small or low contrast.
 - Accessibility is not fully verified for keyboard, screen readers, text scaling, contrast and reduced motion.
 - Reaching zero lesson hearts does not currently impose a consequence; intended behavior is **UNCERTAIN**.
 - `listen` remains in legacy mode types/localization although absent from current lessons.
-- No E2E coverage, backend, authentication, cloud backup or multi-device synchronization.
+- No E2E coverage or multi-device conflict resolution; authentication and JSON state sync use Supabase.
 - Entire current working tree appears untracked; change history/recovery is fragile until a baseline is created.
 
 ## 16. IMPORTANT CONSTRAINTS
 
-- Free-to-play: no required payments or pay-to-win progression. Monetization is not designed.
+- Completely free: no premium features, required payments, paid slots, purchasable Fragments or pay-to-win progression.
 - Licensing: never publish Bibel 2000 without permission; keep it development-only. Revalidate every translation's jurisdiction, attribution and redistribution terms before release.
 - Scripture fidelity: do not silently paraphrase source text; exact-recall normalization may ignore formatting/minor typos but not replace biblical wording.
 - Learning integrity: rewards must follow meaningful learning; recognition alone cannot create “Mastered.”
@@ -281,12 +316,12 @@ Core logic tests are colocated as `src/**/*.test.ts`.
 
 ## 19. NEXT TASK
 
-Build a deterministic 60-day retention simulation/integration suite and fix any failures, because the scheduler is Scriptora's primary value and must be proven before expanding content or rewards.
+Implement and verify the Bibliavia ID MVP: Guest linking, cloud save, email-code cross-device login, account switching and Player ID.
 
 ## 20. HANDOFF SUMMARY
 
-Scriptora is a local-first Expo/React Native Bible memorization game for web/iOS/Android. Its non-negotiable goal is durable recall: users read Scripture, perform many short retrieval exercises, complete full typed or spoken recall, revisit verses through adaptive spacing, and earn XP/chests/character shards only after meaningful practice. Lessons contain ten exercises across Learn, Practice and Master stages, allow positive early exits, save progress, and continue to the next verse. The implemented game layer includes 50-XP daily goals, account levels, streak/Days Active tracking, achievements, three-tap upgradeable chests, gold, a rotating three-offer Shard Shop and 20 initially locked Bible characters.
+Bibliavia is a local-first Expo/React Native Bible game for web/iOS/Android. Reading, Memorization, Review and Challenge are equally valid activities inside optional Paths, with Beats used as smaller milestones when helpful. The existing memorization flow uses short retrieval exercises, full typed or spoken recall and adaptive spacing for durable recall. Lessons contain ten exercises across Learn, Practice and Master stages, allow positive early exits, save progress and continue to the next verse. The current game layer includes 50-XP daily goals, levels, streak/Days Active tracking, achievements, three-tap upgradeable chests, gold, a rotating Shard Shop and locked Bible characters; these current mechanics must be reconciled with the updated effort-scaled reward, transformative Hero and non-purchasable rare Fragment direction before release.
 
-The UI uses a cohesive purple/gold/mint game style across Today, Path, Verses, Collection, Settings and lessons. Romans 1 and Proverbs 1 are the main local curricula. Eight reading plans exist, but the local Bible corpus is incomplete, so many references use external links. English WEB and Chinese CUV source editions are marked public; release status must be rechecked. Bibel 2000 is development-only and must not ship without permission.
+The UI uses a cohesive purple/gold/mint game style across Today, Path, Verses, Collection, Settings and lessons. Romans and Proverbs remain the main curated learning curricula, while all 66 books are locally readable in WEB, CUV-S and CUV-T. Eight reading plans open entirely in-app. Source edition pages mark WEB and both CUV datasets public domain; release review should still confirm applicable jurisdictions. Bibel 2000 contains no text and must not ship without permission.
 
-Architecture is intentionally simple: TypeScript, Expo, custom navigation, React Context and one versioned AsyncStorage JSON object; there is no backend, authentication, database, cloud sync or AI service. Latest validation was 57 passing tests plus TypeScript. Highest priorities are proving long-term retention with simulation/integration tests, establishing a safe version-control baseline, protecting Bible licenses, completing in-app Scripture content, improving answer feedback, and replacing fake Skip Ahead with a real recall challenge.
+Architecture is intentionally simple: TypeScript, Expo, custom navigation, React Context, one shared versioned Bible content layer and one versioned user-state object stored locally and optionally synchronized through Supabase authentication; there is no AI service. Path rules, content, rewards and audiovisual presentation remain separate typed layers. Highest priorities are establishing a safe version-control baseline, protecting Bible licenses, improving answer feedback and reconciling the current character economy with the Hero/Fragment direction.

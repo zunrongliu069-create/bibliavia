@@ -46,6 +46,14 @@ describe('dailyShardShopOffers', () => {
     expect(dailyShardShopOffers(fixture, 20_691).map((offer) => offer.id)).not.toEqual(today);
   });
 
+  it('offers a stable amount between one and ten shards', () => {
+    const offers = dailyShardShopOffers(fixture, 20_690);
+    expect(offers.every((offer) => offer.shardAmount >= 1 && offer.shardAmount <= 10)).toBe(true);
+    expect(dailyShardShopOffers(fixture, 20_690).map((offer) => offer.shardAmount)).toEqual(
+      offers.map((offer) => offer.shardAmount),
+    );
+  });
+
   it('shows every character exactly three times in a complete cycle', () => {
     const firstDay = 20_688;
     const counts = new Map<CharacterId, number>();
