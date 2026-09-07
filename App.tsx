@@ -24,6 +24,8 @@ import { t } from './src/lib/i18n';
 import { uiText } from './src/lib/uiText';
 import { levelForXp, levelRewardFor, xpForLevel } from './src/lib/level';
 import { prioritizedDueVerses, type ReviewMode } from './src/lib/reviewQueue';
+import { recallEligibleVerses } from './src/lib/pathProgress';
+import { pathDefinitions } from './src/data/paths';
 import { colors, shadow } from './src/theme';
 import type { Verse } from './src/types';
 
@@ -55,21 +57,29 @@ function Shell() {
   } | null>(null);
   const [review, setReview] = useState<{
     verses: Verse[];
-    kind: 'lesson' | 'challenge' | ReviewMode;
+    kind: 'lesson' | 'challenge' | 'chapterQuiz' | ReviewMode;
   } | null>(null);
   const startLesson = (verse: Verse) => setReview({ verses: [verse], kind: 'lesson' });
   const startReview = (kind: ReviewMode) => {
-    const verses = prioritizedDueVerses(
+    const eligible = recallEligibleVerses(
+      pathDefinitions,
+      store.progress.pathStates,
       store.availableVerses,
+    );
+    const verses = prioritizedDueVerses(
+      eligible,
       store.progress.mastery,
       store.progress.reviews,
       kind,
     );
     if (verses.length) setReview({ verses, kind });
   };
-  const startChallenge = (pathVerses?: Verse[]) => {
+  const startChallenge = (
+    pathVerses?: Verse[],
+    kind: 'challenge' | 'chapterQuiz' = 'challenge',
+  ) => {
     if (pathVerses?.length) {
-      setReview({ verses: pathVerses, kind: 'challenge' });
+      setReview({ verses: pathVerses, kind });
       return;
     }
     const due = prioritizedDueVerses(

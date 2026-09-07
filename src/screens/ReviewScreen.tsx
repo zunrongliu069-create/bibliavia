@@ -18,7 +18,7 @@ import {
 import { Button, ProgressBar } from '../components/ui';
 import { characterById } from '../data/characters';
 import { chestImageForTier } from '../data/chests';
-import { pathForBook } from '../data/paths';
+import { pathById, pathForBook } from '../data/paths';
 import {
   exactSentenceChoice,
   finishSentenceChoice,
@@ -39,6 +39,7 @@ import { lessonOutcome } from '../lib/lessonOutcome';
 import { chestTierAfterTap, lessonChestTierForStage } from '../lib/rewards';
 import {
   blankExercise,
+  lessonSectionForExercise,
   normalizeRecall,
   recallAccuracy,
   reorderedWords,
@@ -53,9 +54,12 @@ import type {
   ReviewGrade,
   UiLanguage,
   Verse,
+  VersePathLevel,
 } from '../types';
 import type { ReviewMode } from '../lib/reviewQueue';
 import { useAppStore } from '../store/AppStore';
+
+type SessionKind = 'lesson' | 'challenge' | 'chapterQuiz' | ReviewMode;
 
 type SpeechRecognitionLike = {
   lang: string;
@@ -83,10 +87,11 @@ export function ReviewScreen({
 }: {
   initialVerse: Verse;
   reviewVerses?: Verse[];
-  kind: 'lesson' | 'challenge' | ReviewMode;
+  kind: SessionKind;
   onClose: () => void;
 }) {
   const store = useAppStore();
+  const isChallenge = kind === 'challenge' || kind === 'chapterQuiz';
   const u = (text: string) => uiText(store.uiLanguage, text);
   const [lessonVerse, setLessonVerse] = useState(initialVerse);
   const lessonId = lessonVerse.id;
@@ -121,7 +126,7 @@ export function ReviewScreen({
   const [mode, setMode] = useState<ExerciseMode>(() =>
     kind === 'lesson'
       ? lessonModes[resumeIndex]!
-      : kind === 'challenge'
+      : isChallenge
         ? 'recall'
         : recommendedMode(store.progress.mastery[initialVerse.id]),
   );
@@ -146,21 +151,43 @@ export function ReviewScreen({
   const advancingRef = useRef(false);
   const startedAt = useRef(Date.now());
   const sessionId = useRef(`${kind}-${lessonId}-${Date.now()}`);
-  const choice = useMemo(() => wordChoice(verse), [verse]);
-  const lightGaps = useMemo(() => blankExercise(verse.text, verse.languageTag, 0.35), [verse]);
-  const strongGaps = useMemo(() => blankExercise(verse.text, verse.languageTag, 0.65), [verse]);
+  const lessonSection = useMemo(
+    () =>
+      lessonSectionForExercise(
+        verse.text,
+        verse.languageTag,
+        kind === 'lesson' ? exerciseIndex : 9,
+      ),
+    [exerciseIndex, kind, verse.languageTag, verse.text],
+  );
+  const exerciseVerse = useMemo(
+    () => ({ ...verse, text: lessonSection.text }),
+    [lessonSection.text, verse],
+  );
+  const choice = useMemo(() => wordChoice(exerciseVerse), [exerciseVerse]);
+  const lightGaps = useMemo(
+    () => blankExercise(lessonSection.text, verse.languageTag, 0.35),
+    [lessonSection.text, verse.languageTag],
+  );
+  const strongGaps = useMemo(
+    () => blankExercise(lessonSection.text, verse.languageTag, 0.65),
+    [lessonSection.text, verse.languageTag],
+  );
   const initialPhrase = useMemo(
-    () => shortRecallExercise(verse.text, verse.languageTag, 'start'),
-    [verse],
+    () => shortRecallExercise(lessonSection.text, verse.languageTag, 'start'),
+    [lessonSection.text, verse.languageTag],
   );
   const keywordPhrase = useMemo(
-    () => shortRecallExercise(verse.text, verse.languageTag, 'middle'),
-    [verse],
+    () => shortRecallExercise(lessonSection.text, verse.languageTag, 'middle'),
+    [lessonSection.text, verse.languageTag],
   );
-  const finishChoice = useMemo(() => finishSentenceChoice(verse), [verse]);
-  const sentenceChoice = useMemo(() => exactSentenceChoice(verse), [verse]);
+  const finishChoice = useMemo(() => finishSentenceChoice(exerciseVerse), [exerciseVerse]);
+  const sentenceChoice = useMemo(() => exactSentenceChoice(exerciseVerse), [exerciseVerse]);
   const understanding = useMemo(() => understandingChoices(verse), [verse]);
-  const shuffled = useMemo(() => reorderedWords(verse.text, verse.languageTag), [verse]);
+  const shuffled = useMemo(
+    () => reorderedWords(lessonSection.text, verse.languageTag),
+    [lessonSection.text, verse.languageTag],
+  );
   const sequenceIndex = sequence.findIndex((item) => item.id === verse.id);
   const previousVerse = sequence[sequenceIndex - 1];
   const nextVerse = sequence[sequenceIndex + 1];
@@ -196,7 +223,7 @@ export function ReviewScreen({
             ? keywordPhrase.phrase
             : mode === 'context'
               ? initialPhrase.phrase
-              : verse.text;
+              : lessonSection.text;
   const answerDiff = useMemo(
     () => answerWordDiff(answerTarget, answer, verse.languageTag),
     [answerTarget, answer, verse.languageTag],
@@ -233,7 +260,7 @@ export function ReviewScreen({
   };
 
   const prompt = useMemo(() => {
-    if (mode === 'read') return verse.text;
+    if (mode === 'read') return lessonSection.text;
     if (mode === 'blanks')
       return `${lightGaps.prompt}\n\n${t(store.uiLanguage, 'missingWordsOnly')}`;
     if (mode === 'moreBlanks')
@@ -270,6 +297,7 @@ export function ReviewScreen({
     strongGaps,
     initialPhrase,
     keywordPhrase,
+    lessonSection.text,
     store.uiLanguage,
   ]);
 
@@ -341,27 +369,37 @@ export function ReviewScreen({
     setPendingChestTier(tier);
     setPhase('reward');
   };
-  const recordSessionPath = (scores: number[]) => {
+  const recordSessionPath = (scores: number[], level?: VersePathLevel) => {
     const average = scores.length
       ? scores.reduce((sum, item) => sum + item, 0) / scores.length
       : 0.7;
-    const activity =
-      kind === 'lesson' ? 'memorization' : kind === 'challenge' ? 'challenge' : 'review';
-    const campaignId =
-      verse.bookId === 'romans' || verse.bookId === 'proverbs' ? verse.bookId : null;
-    const defaultPath = campaignId ? pathForBook(campaignId, 'memorization') : undefined;
+    const activity = kind === 'lesson' ? 'memorization' : isChallenge ? 'challenge' : 'review';
+    const verseBeatId = `${verse.bookId}-${verse.chapter}-${verse.verseStart}`;
+    const chapterBeatId = `${verse.bookId}-${verse.chapter}`;
+    const focusedPath = store.progress.focusedPathId
+      ? pathById(store.progress.focusedPathId)
+      : undefined;
+    const beatId = focusedPath?.structure === 'chapter' ? chapterBeatId : verseBeatId;
+    const focusedHasNode = focusedPath?.beats?.some((beat) => beat.id === beatId);
+    const defaultPath = pathForBook(verse.bookId, 'memorization');
     const focusedPathId = store.progress.focusedPathId;
-    const pathId =
-      focusedPathId && store.progress.activePathIds?.includes(focusedPathId)
-        ? focusedPathId
-        : defaultPath?.id;
-    if (!pathId) return;
+    const path =
+      focusedPath && focusedHasNode && store.progress.activePathIds?.includes(focusedPathId ?? '')
+        ? focusedPath
+        : defaultPath;
+    if (!path) return;
     store.recordPathActivity({
-      pathId,
-      beatId: pathId === defaultPath?.id ? `${verse.bookId}-${verse.chapter}` : undefined,
+      pathId: path.id,
+      beatId,
       activity,
       quality: activity === 'challenge' ? 1 + Math.max(0, average - 0.8) * 1.5 : average,
       success: average >= 0.55,
+      completion:
+        kind === 'lesson' && level && path.structure === 'verse'
+          ? { type: 'verse-level', level }
+          : kind === 'chapterQuiz' && average >= 0.55 && path.structure === 'chapter'
+            ? { type: 'chapter-part', part: 'quiz' }
+            : undefined,
     });
   };
   const nextLessonVerse = nextVerseAfter(sequence, lessonVerse.id);
@@ -498,7 +536,7 @@ export function ReviewScreen({
         }
         setVerse(nextVerse);
         resetAttempt(
-          kind === 'challenge' ? 'recall' : recommendedMode(store.progress.mastery[nextVerse.id]),
+          isChallenge ? 'recall' : recommendedMode(store.progress.mastery[nextVerse.id]),
         );
         return;
       }
@@ -507,7 +545,10 @@ export function ReviewScreen({
       else store.setLessonProgress(lessonId, nextIndex);
       setExerciseIndex(nextIndex);
       if (nextIndex === 3 || nextIndex === 7 || nextIndex === lessonModes.length) {
-        recordSessionPath(nextScores);
+        recordSessionPath(
+          nextScores,
+          nextIndex === 3 ? 'learn' : nextIndex === 7 ? 'practice' : 'master',
+        );
         setPhase('checkpoint');
         return;
       }
@@ -525,9 +566,7 @@ export function ReviewScreen({
       if (!nextReviewVerse) return onClose();
       setVerse(nextReviewVerse);
       resetAttempt(
-        kind === 'challenge'
-          ? 'recall'
-          : recommendedMode(store.progress.mastery[nextReviewVerse.id]),
+        isChallenge ? 'recall' : recommendedMode(store.progress.mastery[nextReviewVerse.id]),
       );
       return;
     }
@@ -536,7 +575,10 @@ export function ReviewScreen({
     else store.setLessonProgress(lessonId, nextIndex);
     setExerciseIndex(nextIndex);
     if (nextIndex === 3 || nextIndex === 7 || nextIndex === lessonModes.length) {
-      recordSessionPath(sessionScores);
+      recordSessionPath(
+        sessionScores,
+        nextIndex === 3 ? 'learn' : nextIndex === 7 ? 'practice' : 'master',
+      );
       setPhase('checkpoint');
       return;
     }
@@ -549,7 +591,7 @@ export function ReviewScreen({
       setPlayingAudio(false);
       return;
     }
-    Speech.speak(verse.text, {
+    Speech.speak(lessonSection.text, {
       language: verse.languageTag,
       rate: 0.82,
       onStart: () => setPlayingAudio(true),
@@ -716,6 +758,15 @@ export function ReviewScreen({
                 color={colors.mint}
               />
             </View>
+            {!lessonSection.fullVerse && (
+              <Text style={styles.sectionLabel}>
+                {u('Verse part')} {lessonSection.partStart}
+                {lessonSection.partEnd > lessonSection.partStart
+                  ? `–${lessonSection.partEnd}`
+                  : ''}{' '}
+                / {lessonSection.partCount}
+              </Text>
+            )}
             <Text
               selectable
               style={[styles.prompt, verse.languageTag.startsWith('zh') && styles.chinese]}
@@ -1044,7 +1095,7 @@ export function ReviewScreen({
                   >
                     {usesTextInput && mode !== 'recall' && mode !== 'speak'
                       ? answerTarget
-                      : verse.text}
+                      : lessonSection.text}
                   </Text>
                 )}
                 <Button
@@ -1576,6 +1627,13 @@ const styles = StyleSheet.create({
     textTransform: 'capitalize',
   },
   masteryRow: { flexDirection: 'row', gap: 12 },
+  sectionLabel: {
+    alignSelf: 'center',
+    color: '#F8DA78',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
   strength: { flex: 1, gap: 6 },
   strengthTop: { flexDirection: 'row', justifyContent: 'space-between' },
   strengthLabel: { fontSize: 11, fontWeight: '800', color: '#D8CFEB' },

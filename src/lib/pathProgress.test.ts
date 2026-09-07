@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { PathDefinition, UserProgress } from '../types';
-import { applyActivityToProgress, applyPathActivity, createPathState } from './pathProgress';
+import {
+  applyActivityToProgress,
+  applyPathActivity,
+  completeChapterPathPart,
+  completeVersePathLevel,
+  createPathState,
+  migrateStructuredPathState,
+  recallEligibleBeatIds,
+  recallEligibleVerses,
+  setCurrentPathNode,
+} from './pathProgress';
 
 const path: PathDefinition = {
   id: 'romans-reading',
@@ -15,6 +25,145 @@ const path: PathDefinition = {
 };
 
 describe('Path progression', () => {
+  it('unlocks only the next Verse node after Learn and keeps Recall locked until Master', () => {
+    const versePath: PathDefinition = {
+      id: 'verse-path',
+      title: 'Verse Path',
+      source: 'curated',
+      kind: 'memorization',
+      structure: 'verse',
+      beats: [
+        { id: 'v1', title: 'Verse 1', target: 1 },
+        { id: 'v2', title: 'Verse 2', target: 1, parentId: 'v1' },
+        { id: 'v3', title: 'Verse 3', target: 1, parentId: 'v2' },
+      ],
+    };
+    const learned = completeVersePathLevel(versePath, createPathState(versePath), 'v1', 'learn');
+    expect(learned.nodeProgress?.v2?.status).toBe('available');
+    expect(learned.nodeProgress?.v3?.status).toBe('locked');
+    expect(recallEligibleBeatIds(versePath, learned)).toEqual([]);
+
+    expect(() => completeVersePathLevel(versePath, learned, 'v1', 'master')).toThrow(
+      'Practice must be completed before Master.',
+    );
+    const practiced = completeVersePathLevel(versePath, learned, 'v1', 'practice');
+    const mastered = completeVersePathLevel(versePath, practiced, 'v1', 'master');
+    expect(recallEligibleBeatIds(versePath, mastered)).toEqual(['v1']);
+    expect(learned.nodeProgress?.v1?.levels?.practice).toBe(false);
+    const advanced = setCurrentPathNode(versePath, mastered, 'v2');
+    expect(advanced.nodeProgress?.v1?.status).toBe('completed');
+    expect(advanced.nodeProgress?.v2?.status).toBe('current');
+  });
+
+  it('requires reading and then quiz to complete a Chapter node', () => {
+    const chapterPath: PathDefinition = {
+      id: 'chapter-path',
+      title: 'Chapter Path',
+      source: 'curated',
+      kind: 'reading',
+      structure: 'chapter',
+      beats: [
+        { id: 'c1', title: 'Chapter 1', target: 1 },
+        { id: 'c2', title: 'Chapter 2', target: 1, parentId: 'c1' },
+      ],
+    };
+    const initial = createPathState(chapterPath);
+    expect(() => completeChapterPathPart(chapterPath, initial, 'c1', 'quiz')).toThrow(
+      'Chapter reading must be completed before its quiz.',
+    );
+    const read = completeChapterPathPart(chapterPath, initial, 'c1', 'reading');
+    expect(read.nodeProgress?.c2?.status).toBe('locked');
+    const quizzed = completeChapterPathPart(chapterPath, read, 'c1', 'quiz');
+    expect(quizzed.nodeProgress?.c1?.status).toBe('completed');
+    expect(quizzed.nodeProgress?.c2?.status).toBe('available');
+  });
+
+  it('applies structured completion without using legacy numeric Beat progress', () => {
+    const versePath: PathDefinition = {
+      id: 'structured',
+      title: 'Structured',
+      source: 'curated',
+      kind: 'memorization',
+      structure: 'verse',
+      beats: [
+        {
+          id: 'romans-1-1',
+          title: 'Romans 1:1',
+          target: 100,
+          nodeKind: 'content',
+          passage: {
+            bookId: 'romans',
+            startChapter: 1,
+            startVerse: 1,
+            endChapter: 1,
+            endVerse: 1,
+          },
+        },
+      ],
+    };
+    const progress = { pathStates: {}, activePathIds: [] } as unknown as UserProgress;
+    const applied = applyActivityToProgress(progress, versePath, {
+      activity: 'memorization',
+      beatId: 'romans-1-1',
+      completion: { type: 'verse-level', level: 'learn' },
+      at: new Date('2026-09-02T10:00:00Z'),
+    });
+    expect(applied.result.state.nodeProgress?.['romans-1-1']?.levels?.learn).toBe(true);
+    expect(applied.result.state.beatProgress['romans-1-1']).toBe(0);
+    const review = applyActivityToProgress(applied.progress, versePath, {
+      activity: 'review',
+      beatId: 'romans-1-1',
+      at: new Date('2026-09-03T10:00:00Z'),
+    });
+    expect(review.result.appliedProgress).toBe(0);
+    expect(review.result.state.beatProgress['romans-1-1']).toBe(0);
+  });
+
+  it('derives the global Recall pool from Master and migrates completed legacy lessons', () => {
+    const versePath: PathDefinition = {
+      id: 'memory',
+      title: 'Memory',
+      source: 'curated',
+      kind: 'memorization',
+      structure: 'verse',
+      beats: [
+        {
+          id: 'romans-1-1',
+          title: 'Romans 1:1',
+          target: 1,
+          nodeKind: 'content',
+          passage: {
+            bookId: 'romans',
+            startChapter: 1,
+            startVerse: 1,
+            endChapter: 1,
+            endVerse: 1,
+          },
+        },
+      ],
+    };
+    const migrated = migrateStructuredPathState(
+      versePath,
+      { ...createPathState({ ...versePath, structure: undefined }), nodeProgress: undefined },
+      ['webp-romans-1-1'],
+    );
+    const verses = [
+      {
+        id: 'webp-romans-1-1',
+        bookId: 'romans',
+        chapter: 1,
+        verseStart: 1,
+      },
+      {
+        id: 'webp-romans-1-2',
+        bookId: 'romans',
+        chapter: 1,
+        verseStart: 2,
+      },
+    ] as import('../types').Verse[];
+    expect(recallEligibleVerses([versePath], { memory: migrated }, verses)).toEqual([verses[0]]);
+  });
+
   it('keeps diminishing returns separate by activity, Beat, and local day', () => {
     let state = createPathState(path);
     const at = new Date(2026, 7, 31, 10);

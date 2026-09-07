@@ -24,6 +24,28 @@ export type PathActivityType = 'reading' | 'memorization' | 'review' | 'challeng
 export type PathTone = 'triumphant' | 'reflective' | 'solemn' | 'hopeful';
 export type PathSource = 'curated' | 'user';
 export type PathKind = 'reading' | 'memorization' | 'mixed';
+export type PathStructure = 'verse' | 'chapter';
+export type PathNodeKind = 'content' | 'boss' | 'final-boss';
+export type PathNodeStatus = 'locked' | 'available' | 'current' | 'completed';
+export type VersePathLevel = 'learn' | 'practice' | 'master';
+
+export interface PathChapterSection {
+  id: string;
+  title: string;
+  titles?: Partial<Record<UiLanguage, string>>;
+  passage: BiblePassageReference;
+}
+
+export interface PathBossContent {
+  kind: 'boss' | 'final-boss';
+  coverage: BiblePassageReference[];
+}
+
+export interface PathRegionDefinition {
+  id: string;
+  title: string;
+  titles?: Partial<Record<UiLanguage, string>>;
+}
 
 export interface PathBeatDefinition {
   id: string;
@@ -37,6 +59,10 @@ export interface PathBeatDefinition {
   passages?: BiblePassageReference[];
   milestone?: boolean;
   discovery?: Partial<Record<UiLanguage, string>>;
+  nodeKind?: PathNodeKind;
+  sections?: PathChapterSection[];
+  boss?: PathBossContent;
+  regionId?: string;
 }
 
 export interface PathDefinition {
@@ -45,10 +71,12 @@ export interface PathDefinition {
   titles?: Partial<Record<UiLanguage, string>>;
   source: PathSource;
   kind: PathKind;
+  structure?: PathStructure;
   target?: number;
   beats?: PathBeatDefinition[];
   bibleVersionId?: string;
   passage?: BiblePassageReference;
+  regions?: PathRegionDefinition[];
 }
 
 export interface BiblePassageReference {
@@ -69,10 +97,20 @@ export interface PathState {
   completedAt: string | null;
   lastActivityAt: string | null;
   activityCounts: Record<string, number>;
+  nodeProgress?: Record<string, PathNodeProgress>;
   mastery?: {
     status: 'not-started' | 'refreshing' | 'retained';
     retainedBeatIds: string[];
     lastCheckedAt: string | null;
+  };
+}
+
+export interface PathNodeProgress {
+  status: PathNodeStatus;
+  levels?: Record<VersePathLevel, boolean>;
+  chapter?: {
+    readingCompleted: boolean;
+    quizCompleted: boolean;
   };
 }
 export type FeedbackEventType =

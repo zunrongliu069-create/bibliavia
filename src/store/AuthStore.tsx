@@ -143,9 +143,11 @@ export function AuthStoreProvider({ children }: { children: React.ReactNode }) {
   const verifyEmailCode = useCallback(
     async (email: string, code: string, mode: EmailCodeMode) => {
       if (!supabase) return 'Cloud accounts are not configured yet.';
+      const cleanCode = code.replace(/\D/g, '').slice(0, 6);
+      if (cleanCode.length !== 6) return 'Enter the 6-digit verification code.';
       const { data, error } = await supabase.auth.verifyOtp({
         email: email.trim().toLowerCase(),
-        token: code.trim(),
+        token: cleanCode,
         type: mode === 'connect' ? 'email_change' : 'email',
       });
       if (error) return error.message;

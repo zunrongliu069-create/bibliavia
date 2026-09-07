@@ -18,6 +18,65 @@ export function tokenize(text: string, languageTag: string): string[] {
   return text.match(/[\p{L}\p{N}]+(?:[’'][\p{L}]+)?/gu) ?? [];
 }
 
+export const VERSE_CHUNK_CONFIG = {
+  longVerseThreshold: 18,
+  maxWordsPerChunk: 9,
+  individualExerciseCount: 7,
+} as const;
+
+export interface VerseLearningSection {
+  text: string;
+  partStart: number;
+  partEnd: number;
+  partCount: number;
+  fullVerse: boolean;
+}
+
+export function verseLearningChunks(text: string, languageTag: string): string[] {
+  const words = tokenize(text, languageTag);
+  if (words.length <= VERSE_CHUNK_CONFIG.longVerseThreshold) return [text.trim()];
+  const chunkCount = Math.ceil(words.length / VERSE_CHUNK_CONFIG.maxWordsPerChunk);
+  const chunkSize = Math.ceil(words.length / chunkCount);
+  const joiner = languageTag.startsWith('zh') ? '' : ' ';
+  return Array.from({ length: chunkCount }, (_, index) =>
+    words.slice(index * chunkSize, (index + 1) * chunkSize).join(joiner),
+  ).filter(Boolean);
+}
+
+export function lessonSectionForExercise(
+  text: string,
+  languageTag: string,
+  exerciseIndex: number,
+): VerseLearningSection {
+  const chunks = verseLearningChunks(text, languageTag);
+  if (chunks.length === 1 || exerciseIndex >= 8)
+    return {
+      text,
+      partStart: 1,
+      partEnd: chunks.length,
+      partCount: chunks.length,
+      fullVerse: true,
+    };
+  if (exerciseIndex < VERSE_CHUNK_CONFIG.individualExerciseCount) {
+    const part = exerciseIndex % chunks.length;
+    return {
+      text: chunks[part]!,
+      partStart: part + 1,
+      partEnd: part + 1,
+      partCount: chunks.length,
+      fullVerse: false,
+    };
+  }
+  const partEnd = Math.max(2, Math.ceil(chunks.length / 2));
+  return {
+    text: chunks.slice(0, partEnd).join(languageTag.startsWith('zh') ? '' : ' '),
+    partStart: 1,
+    partEnd,
+    partCount: chunks.length,
+    fullVerse: false,
+  };
+}
+
 export function normalizeRecall(text: string): string[] {
   return (
     text

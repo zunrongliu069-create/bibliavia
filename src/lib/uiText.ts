@@ -847,6 +847,7 @@ const phrases: Record<string, Localized> = {
   Advanced: { sv: 'Avancerad', 'zh-Hans': '进阶', 'zh-Hant': '進階' },
   Developing: { sv: 'Pågående', 'zh-Hans': '发展中', 'zh-Hant': '發展中' },
   Starting: { sv: 'Startar', 'zh-Hans': '起步', 'zh-Hant': '起步' },
+  'Verse part': { sv: 'Versdel', 'zh-Hans': '经文部分', 'zh-Hant': '經文部分' },
 };
 
 export const uiText = (language: UiLanguage, english: string): string =>

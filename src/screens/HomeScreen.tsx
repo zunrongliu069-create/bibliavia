@@ -20,7 +20,7 @@ import { uiText } from '../lib/uiText';
 import { levelProgressForXp, levelRewardFor, titleTierForLevel } from '../lib/level';
 import { learningSequence } from '../lib/learningSequence';
 import { masteryPercent, recallRisk, retrievability } from '../lib/scheduler';
-import { nextPathBeat, pathProgressRatio } from '../lib/pathProgress';
+import { nextPathBeat, pathProgressRatio, recallEligibleVerses } from '../lib/pathProgress';
 import { nextPathAction, pathResumeSummary } from '../lib/pathGuidance';
 import { prioritizedDueVerses, reviewHealth, type ReviewMode } from '../lib/reviewQueue';
 import { colors, radius } from '../theme';
@@ -49,7 +49,7 @@ export function HomeScreen({
     (verse) => verse.bookId === store.progress.activeCampaign,
   );
   const orderedVerses = learningSequence(store.availableVerses);
-  const allPaths = [...pathDefinitions, ...(store.progress.customPaths ?? [])];
+  const allPaths = pathDefinitions;
   const homePaths = (store.progress.activePathIds ?? [])
     .map((id) => allPaths.find((path) => path.id === id))
     .filter((path): path is NonNullable<typeof path> => Boolean(path))
@@ -69,14 +69,19 @@ export function HomeScreen({
     focusedPath && focusedReference
       ? getReferencedPassage(focusedPath.bibleVersionId ?? store.translationId, focusedReference)
       : [];
-  const due = prioritizedDueVerses(
+  const recallVerses = recallEligibleVerses(
+    pathDefinitions,
+    store.progress.pathStates,
     orderedVerses,
+  );
+  const due = prioritizedDueVerses(
+    recallVerses,
     store.progress.mastery,
     store.progress.reviews,
     'full',
     now,
   );
-  const health = reviewHealth(orderedVerses, store.progress.mastery, now);
+  const health = reviewHealth(recallVerses, store.progress.mastery, now);
   const firstNew = (focusedVerses.length ? focusedVerses : orderedVerses).find(
     (verse) =>
       !store.progress.completedLessonIds.includes(verse.id) &&

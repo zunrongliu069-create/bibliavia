@@ -3,9 +3,11 @@ import {
   blankExercise,
   blankedText,
   initials,
+  lessonSectionForExercise,
   recallAccuracy,
   shortRecallExercise,
   tokenize,
+  verseLearningChunks,
 } from './tokenize';
 
 describe('language-aware exercises', () => {
@@ -56,5 +58,26 @@ describe('language-aware exercises', () => {
     expect(
       tokenize(shortRecallExercise(verse, 'en', 'middle').phrase, 'en').length,
     ).toBeLessThanOrEqual(6);
+  });
+
+  it('keeps short verses whole and divides long verses into manageable parts', () => {
+    expect(verseLearningChunks('The Lord is my shepherd.', 'en')).toEqual([
+      'The Lord is my shepherd.',
+    ]);
+    const longVerse =
+      'Therefore you are without excuse whoever you are when you judge another because you condemn yourself by judging them while practicing the same things.';
+    const chunks = verseLearningChunks(longVerse, 'en');
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => tokenize(chunk, 'en').length <= 9)).toBe(true);
+  });
+
+  it('practices long verses by parts before asking for the full verse', () => {
+    const longVerse =
+      'Therefore you are without excuse whoever you are when you judge another because you condemn yourself by judging them while practicing the same things.';
+    const first = lessonSectionForExercise(longVerse, 'en', 0);
+    const later = lessonSectionForExercise(longVerse, 'en', 9);
+    expect(first.fullVerse).toBe(false);
+    expect(first.text).not.toBe(longVerse);
+    expect(later).toMatchObject({ text: longVerse, fullVerse: true });
   });
 });

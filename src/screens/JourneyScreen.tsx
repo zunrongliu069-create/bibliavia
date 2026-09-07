@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { PathGameWorld } from '../components/PathGameWorld';
 import { Button, ProgressBar } from '../components/ui';
 import {
   bibleVersions,
@@ -12,6 +13,7 @@ import { beatTitle, pathDefinitions, pathTitle } from '../data/paths';
 import { learningSequence } from '../lib/learningSequence';
 import { nextPathBeat, pathProgressRatio, pathTarget } from '../lib/pathProgress';
 import { nextPathAction, pathResumeSummary, pathTypeLabel } from '../lib/pathGuidance';
+import { t } from '../lib/i18n';
 import { uiText } from '../lib/uiText';
 import { useAppStore } from '../store/AppStore';
 import { colors, radius, shadow } from '../theme';
@@ -35,14 +37,11 @@ export function JourneyScreen({
   onBrowseBible: () => void;
   onRead: (passage: { label: string; versionId: string; verses: Verse[] }) => void;
   onMemorize: (verse: Verse) => void;
-  onChallenge: (verses: Verse[]) => void;
+  onChallenge: (verses: Verse[], kind?: 'challenge' | 'chapterQuiz') => void;
 }) {
   const store = useAppStore();
   const u = (text: string) => uiText(store.uiLanguage, text);
-  const allPaths = useMemo(
-    () => [...pathDefinitions, ...(store.progress.customPaths ?? [])],
-    [store.progress.customPaths],
-  );
+  const allPaths = pathDefinitions;
   const activePaths = (store.progress.activePathIds ?? [])
     .map((id) => allPaths.find((path) => path.id === id))
     .filter((path): path is PathDefinition => Boolean(path));
@@ -61,7 +60,9 @@ export function JourneyScreen({
   const selectedPath =
     allPaths.find((path) => path.id === selectedPathId) ?? activePaths[0] ?? allPaths[0]!;
   const selectedState = store.progress.pathStates?.[selectedPath.id];
-  const nextBeat = nextPathBeat(selectedPath, selectedState);
+  const nextBeat =
+    nextPathBeat(selectedPath, selectedState) ??
+    (!selectedState ? selectedPath.beats?.[0] : undefined);
   const ratio = pathProgressRatio(selectedPath, selectedState);
   const smartAction = nextPathAction(selectedPath, selectedState, store.uiLanguage);
   const selectedBeats = selectedPath.beats ?? [];
@@ -70,9 +71,7 @@ export function JourneyScreen({
     selectedBeats.findIndex((beat) => selectedState?.activeBeatIds.includes(beat.id)),
   );
   const beatWindowStart = Math.max(0, selectedActiveIndex - 1);
-  const visibleBeats = selectedState
-    ? selectedBeats.slice(beatWindowStart, beatWindowStart + 6)
-    : [];
+  const visibleBeats = selectedBeats.slice(beatWindowStart, beatWindowStart + 6);
   const completedPaths = Object.values(store.progress.pathStates ?? {}).filter(
     (path) => path.status === 'completed',
   ).length;
@@ -80,12 +79,34 @@ export function JourneyScreen({
     learningSequence(store.availableVerses).find(
       (verse) => !store.progress.mastery[verse.id]?.successfulRecalls,
     ) ?? store.availableVerses[0];
-  const selectedVersionId = selectedPath.bibleVersionId ?? store.translationId;
-  const selectedVersion = bibleVersions.find((version) => version.id === selectedVersionId);
+  const preferredVersionId = selectedPath.bibleVersionId ?? store.translationId;
   const selectedReference = nextBeat?.passage ?? nextBeat?.passages?.[0] ?? selectedPath.passage;
-  const selectedVerses = selectedReference
+  const selectedVersionId = selectedReference
+    ? ([
+        preferredVersionId,
+        ...bibleVersions
+          .filter((version) => isBibleVersionEnabled(version.id))
+          .map((version) => version.id),
+      ].find((versionId) => getReferencedPassage(versionId, selectedReference).length > 0) ??
+      preferredVersionId)
+    : preferredVersionId;
+  const selectedVersion = bibleVersions.find((version) => version.id === selectedVersionId);
+  const versionPassage = selectedReference
     ? getReferencedPassage(selectedVersionId, selectedReference)
     : [];
+  const selectedVerses =
+    versionPassage.length || !selectedReference
+      ? versionPassage
+      : store.availableVerses.filter(
+          (verse) =>
+            verse.bookId === selectedReference.bookId &&
+            verse.chapter >= selectedReference.startChapter &&
+            verse.chapter <= selectedReference.endChapter &&
+            (verse.chapter > selectedReference.startChapter ||
+              verse.verseStart >= selectedReference.startVerse) &&
+            (verse.chapter < selectedReference.endChapter ||
+              verse.verseEnd <= selectedReference.endVerse),
+        );
   const selectedPassageEnd = selectedVerses.at(-1);
   const pathActivityVerses = selectedReference ? selectedVerses : store.availableVerses;
   const createVersions = bibleVersions.filter((version) => isBibleVersionEnabled(version.id));
@@ -138,257 +159,405 @@ export function JourneyScreen({
     } else if (smartAction.activity === 'memorization') {
       const verse = pathActivityVerses[0] ?? nextVerse;
       if (verse) onMemorize(verse);
-    } else onChallenge(pathActivityVerses.slice(0, 5));
+    } else
+      onChallenge(
+        selectedPath.structure === 'chapter' ? selectedVerses : pathActivityVerses.slice(0, 5),
+        selectedPath.structure === 'chapter' ? 'chapterQuiz' : 'challenge',
+      );
   };
+
+  const incompleteVerseIndex = selectedVerses.findIndex((verse) => {
+    const read = store.progress.readVerseIds[verse.id];
+    const recalled = (store.progress.mastery[verse.id]?.successfulRecalls ?? 0) > 0;
+    if (selectedPath.kind === 'reading') return !read;
+    if (selectedPath.kind === 'memorization') return !recalled;
+    return !read || !recalled;
+  });
+  const currentVerseIndex = incompleteVerseIndex >= 0 ? incompleteVerseIndex : 0;
+  const currentPathVerse = selectedVerses[currentVerseIndex] ?? nextVerse;
+  const followingPathVerse = selectedVerses[currentVerseIndex + 1];
+  const currentNodeProgress = nextBeat ? selectedState?.nodeProgress?.[nextBeat.id] : undefined;
+  const currentRead = currentPathVerse
+    ? Boolean(store.progress.readVerseIds[currentPathVerse.id])
+    : false;
+  const currentBeatIndex = nextBeat
+    ? selectedBeats.findIndex((beat) => beat.id === nextBeat.id)
+    : 0;
+  const followingBeat = selectedBeats[Math.max(0, currentBeatIndex) + 1];
+  const showLegacyPathManager = false as boolean;
 
   return (
     <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}>
-      <View style={styles.hero}>
-        <Text style={styles.brand}>BIBLIAVIA PATHS</Text>
-        <Text style={styles.title}>{u('Where are you going?')}</Text>
-        <Text style={styles.subtitle}>
-          {u('Choose long-term goals. Reading and memorization are equal ways forward.')}
-        </Text>
-        <View style={styles.heroStats}>
-          <PathStat value={activePaths.length} label={u('Active Paths')} />
-          <PathStat value={completedPaths} label={u('Completed')} />
-          <PathStat
-            value={Object.values(store.progress.pathStates ?? {}).reduce(
-              (sum, path) => sum + path.completedBeatIds.length,
-              0,
-            )}
-            label={u('Beats')}
-          />
-        </View>
-      </View>
+      <PathGameWorld
+        pathId={selectedPath.id}
+        title={pathTitle(selectedPath, store.uiLanguage)}
+        ratio={ratio}
+        chapterLabel={
+          nextBeat
+            ? beatTitle(nextBeat, store.uiLanguage)
+            : currentPathVerse
+              ? `${currentPathVerse.bookName} ${currentPathVerse.chapter}`
+              : pathTitle(selectedPath, store.uiLanguage)
+        }
+        nextChapterLabel={followingBeat ? beatTitle(followingBeat, store.uiLanguage) : undefined}
+        currentVerseLabel={currentPathVerse?.reference}
+        nextVerseLabel={followingPathVerse?.reference}
+        paths={(activePaths.length ? activePaths : [selectedPath]).slice(0, 3).map((path) => ({
+          id: path.id,
+          title: pathTitle(path, store.uiLanguage),
+          selected: path.id === selectedPath.id,
+        }))}
+        nodes={visibleBeats.map((beat) => ({
+          id: beat.id,
+          index: selectedBeats.indexOf(beat),
+          regionId: beat.regionId,
+          label: beatTitle(beat, store.uiLanguage),
+          complete:
+            selectedState?.nodeProgress?.[beat.id]?.status === 'completed' ||
+            (selectedState?.completedBeatIds.includes(beat.id) ?? false),
+          current:
+            selectedState?.nodeProgress?.[beat.id]?.status === 'current' ||
+            beat.id === nextBeat?.id,
+          available:
+            beat.nodeKind === 'content' &&
+            selectedState?.nodeProgress?.[beat.id]?.status === 'available',
+          milestone: beat.milestone,
+        }))}
+        totalNodeCount={selectedBeats.length}
+        uiLanguage={store.uiLanguage}
+        reduceMotion={store.feedbackSettings.reduceMotion}
+        steps={
+          selectedPath.structure === 'verse'
+            ? [
+                {
+                  id: 'learn',
+                  icon: 'book-outline' as const,
+                  label: t(store.uiLanguage, 'stageLearn'),
+                  complete: currentNodeProgress?.levels?.learn ?? false,
+                  onPress: () => currentPathVerse && onMemorize(currentPathVerse),
+                },
+                {
+                  id: 'practice',
+                  icon: 'bulb-outline' as const,
+                  label: t(store.uiLanguage, 'stagePractice'),
+                  complete: currentNodeProgress?.levels?.practice ?? false,
+                  locked: !currentNodeProgress?.levels?.learn,
+                  onPress: () => currentPathVerse && onMemorize(currentPathVerse),
+                },
+                {
+                  id: 'master',
+                  icon: 'sparkles-outline' as const,
+                  label: t(store.uiLanguage, 'stageMaster'),
+                  complete: currentNodeProgress?.levels?.master ?? false,
+                  locked: !currentNodeProgress?.levels?.practice,
+                  onPress: () => currentPathVerse && onMemorize(currentPathVerse),
+                },
+              ]
+            : [
+                {
+                  id: 'read',
+                  icon: 'book-outline' as const,
+                  label: u('READ'),
+                  complete: currentNodeProgress?.chapter?.readingCompleted ?? currentRead,
+                  onPress: () =>
+                    onRead({
+                      label: nextBeat ? beatTitle(nextBeat, store.uiLanguage) : selectedPath.title,
+                      versionId: selectedVersionId,
+                      verses: selectedVerses,
+                    }),
+                },
+                {
+                  id: 'quiz',
+                  icon: 'help-circle-outline' as const,
+                  label: u('CHALLENGE'),
+                  complete: currentNodeProgress?.chapter?.quizCompleted ?? false,
+                  locked: !currentNodeProgress?.chapter?.readingCompleted,
+                  onPress: () => onChallenge(selectedVerses, 'chapterQuiz'),
+                },
+              ]
+        }
+        continueLabel={smartAction.label}
+        started={Boolean(selectedState)}
+        complete={selectedState?.status === 'completed'}
+        onContinue={performSmartAction}
+        onStart={() => {
+          store.startPath(selectedPath.id);
+          store.focusPath(selectedPath.id);
+        }}
+        onSelectPath={selectPath}
+        onSelectNode={(beatId) => store.selectPathNode(selectedPath.id, beatId)}
+        onPracticeNode={(beatId) => {
+          const reference = selectedBeats.find((beat) => beat.id === beatId)?.passage;
+          const verses = reference ? getReferencedPassage(selectedVersionId, reference) : [];
+          if (selectedPath.structure === 'verse') {
+            if (verses[0]) onMemorize(verses[0]);
+          } else if (verses.length) {
+            onRead({
+              label: beatTitle(selectedBeats.find((beat) => beat.id === beatId)!, store.uiLanguage),
+              versionId: selectedVersionId,
+              verses,
+            });
+          }
+        }}
+      />
 
-      {activePaths.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>{u('ACTIVE PATHS')}</Text>
-          <View style={styles.activeGrid}>
-            {activePaths.slice(0, 3).map((path) => {
-              const state = store.progress.pathStates?.[path.id];
-              const active = selectedPath.id === path.id;
-              return (
-                <Pressable
-                  key={path.id}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  onPress={() => selectPath(path.id)}
-                  style={[styles.activeCard, active && styles.activeCardSelected]}
-                >
-                  <Ionicons name={pathIcon(path)} size={20} color={colors.primary} />
-                  <Text numberOfLines={2} style={styles.activeTitle}>
-                    {pathTitle(path, store.uiLanguage)}
-                  </Text>
-                  <ProgressBar value={pathProgressRatio(path, state)} color={colors.mint} />
-                  <Text style={styles.activeDetail}>
-                    {Math.round(pathProgressRatio(path, state) * 100)}% ·{' '}
-                    {(nextPathBeat(path, state) &&
-                      beatTitle(nextPathBeat(path, state)!, store.uiLanguage)) ??
-                      u('Path complete')}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      )}
-
-      <View style={styles.selectedPath}>
-        <View style={styles.selectedTop}>
-          <View style={styles.selectedIcon}>
-            <Ionicons name={pathIcon(selectedPath)} size={26} color={colors.white} />
-          </View>
-          <View style={styles.selectedCopy}>
-            <Text style={styles.sourceLabel}>
-              {pathTypeLabel(selectedPath, store.uiLanguage)} ·{' '}
-              {selectedPath.source === 'curated' ? u('CURATED PATH') : u('YOUR PATH')}
+      {showLegacyPathManager && (
+        <>
+          <View style={styles.hero}>
+            <Text style={styles.brand}>BIBLIAVIA PATHS</Text>
+            <Text style={styles.title}>{u('Where are you going?')}</Text>
+            <Text style={styles.subtitle}>
+              {u('Choose long-term goals. Reading and memorization are equal ways forward.')}
             </Text>
-            <Text style={styles.selectedTitle}>{pathTitle(selectedPath, store.uiLanguage)}</Text>
-            <Text style={styles.selectedDetail}>
-              {selectedState?.pathProgress ?? 0} / {pathTarget(selectedPath)} ·{' '}
-              {selectedState?.status === 'completed'
-                ? u('Path complete')
-                : nextBeat
-                  ? `${u('Next')}: ${beatTitle(nextBeat, store.uiLanguage)}`
-                  : u('Ready to begin')}
-            </Text>
-            {selectedReference && (
-              <Text style={styles.referenceDetail}>
-                {selectedVersion?.abbreviation ?? selectedVersionId} ·{' '}
-                {selectedVerses[0]?.bookName ?? selectedReference.bookId}{' '}
-                {selectedReference.startChapter}:{selectedReference.startVerse}–
-                {selectedPassageEnd?.chapter === selectedReference.startChapter
-                  ? selectedPassageEnd.verseEnd
-                  : `${selectedPassageEnd?.chapter ?? selectedReference.endChapter}:${selectedPassageEnd?.verseEnd ?? selectedReference.endVerse}`}
-              </Text>
-            )}
-          </View>
-          <Text style={styles.percent}>{Math.round(ratio * 100)}%</Text>
-        </View>
-        <ProgressBar value={ratio} color={colors.gold} />
-        {selectedState && selectedState.status !== 'completed' && (
-          <View style={styles.resumeCard}>
-            <Text style={styles.resumeLabel}>{u('RESUME PATH')}</Text>
-            <Text style={styles.resumeText}>
-              {pathResumeSummary(selectedPath, selectedState, store.uiLanguage)}
-            </Text>
-          </View>
-        )}
-        {!selectedState && (
-          <View style={styles.previewCard}>
-            <Text style={styles.previewTitle}>{u('PATH PREVIEW')}</Text>
-            <Text style={styles.previewText}>
-              {selectedPath.beats?.length ?? 1} {u('Beats')} ·{' '}
-              {selectedPath.beats?.filter((beat) => beat.milestone).length ?? 0} {u('milestones')}
-            </Text>
-            {selectedPath.beats?.slice(0, 3).map((beat, index) => (
-              <Text key={beat.id} style={styles.previewStep}>
-                {index + 1}. {beatTitle(beat, store.uiLanguage)}
-              </Text>
-            ))}
-            <Button
-              label={u('Start Path')}
-              onPress={() => {
-                store.startPath(selectedPath.id);
-                store.focusPath(selectedPath.id);
-              }}
-            />
-          </View>
-        )}
-        {selectedState?.status === 'completed' ? (
-          <View style={styles.completionCard}>
-            <Ionicons name="checkmark-circle" size={26} color={colors.mint} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.completionTitle}>{u('THIS GOAL IS COMPLETE')}</Text>
-              <Text style={styles.completionText}>{u('Your completed journey remains here.')}</Text>
+            <View style={styles.heroStats}>
+              <PathStat value={activePaths.length} label={u('Active Paths')} />
+              <PathStat value={completedPaths} label={u('Completed')} />
+              <PathStat
+                value={Object.values(store.progress.pathStates ?? {}).reduce(
+                  (sum, path) => sum + path.completedBeatIds.length,
+                  0,
+                )}
+                label={u('Beats')}
+              />
             </View>
           </View>
-        ) : selectedState ? (
-          <Button
-            label={`${smartAction.label} · ${smartAction.detail}`}
-            onPress={performSmartAction}
-          />
-        ) : null}
-        {selectedState?.status !== 'completed' && (
-          <Button
-            label={showAlternatives ? u('Hide other activities') : u('Other activities')}
-            variant="ghost"
-            onPress={() => setShowAlternatives((value) => !value)}
-          />
-        )}
-        {showAlternatives && selectedState?.status !== 'completed' && (
-          <View style={styles.actions}>
-            <PathAction
-              icon="book"
-              label={u('READ')}
-              detail={u('Calm progress')}
-              disabled={!pathActivityVerses.length}
-              onPress={() =>
-                onRead({
-                  label: pathTitle(selectedPath, store.uiLanguage),
-                  versionId: selectedVersionId,
-                  verses: pathActivityVerses,
-                })
-              }
-            />
-            <PathAction
-              icon="bulb"
-              label={u('MEMORIZE')}
-              detail={u('Focused recall')}
-              disabled={!pathActivityVerses[0] && !nextVerse}
-              onPress={() =>
-                (pathActivityVerses[0] ?? nextVerse) &&
-                onMemorize(pathActivityVerses[0] ?? nextVerse!)
-              }
-            />
-            <PathAction
-              icon="trophy"
-              label={u('CHALLENGE')}
-              detail={u('Risk · larger progress')}
-              disabled={!pathActivityVerses.length}
-              onPress={() => onChallenge(pathActivityVerses.slice(0, 5))}
-            />
-          </View>
-        )}
-        {selectedReference && !selectedVerses.length && (
-          <Text style={styles.unavailable}>{u('Bible text unavailable for this version.')}</Text>
-        )}
 
-        {visibleBeats.length ? (
-          <View style={styles.beatMap}>
-            {visibleBeats.map((beat, windowIndex) => {
-              const index = beatWindowStart + windowIndex;
-              const completed = selectedState?.completedBeatIds.includes(beat.id) ?? false;
-              const active = selectedState?.activeBeatIds.includes(beat.id) ?? index === 0;
-              const distance = index - selectedActiveIndex;
-              const revealed = completed || active || distance <= 1;
-              const partlyRevealed = !revealed && distance === 2;
-              const beatRatio = Math.min(
-                1,
-                (selectedState?.beatProgress[beat.id] ?? 0) / Math.max(1, beat.target),
-              );
-              return (
-                <View key={beat.id} style={styles.beatRow}>
-                  <View
-                    style={[
-                      styles.beatNode,
-                      completed && styles.beatNodeComplete,
-                      active && styles.beatNodeActive,
-                    ]}
-                  >
-                    <Ionicons
-                      name={completed ? 'checkmark' : active ? 'navigate' : 'lock-closed'}
-                      size={17}
-                      color={completed || active ? colors.white : colors.muted}
-                    />
-                  </View>
-                  <View style={[styles.beatCard, !revealed && styles.fogCard]}>
-                    <Text style={styles.beatTitle}>
-                      {beat.milestone && revealed ? '◆ ' : ''}
-                      {revealed
-                        ? beatTitle(beat, store.uiLanguage)
-                        : partlyRevealed
-                          ? `${beatTitle(beat, store.uiLanguage).slice(0, 8)}…`
-                          : '•••'}
-                    </Text>
-                    {revealed ? (
-                      <>
-                        <ProgressBar
-                          value={beatRatio}
-                          color={completed ? colors.mint : colors.gold}
-                        />
-                        <Text style={styles.beatDetail}>
-                          {completed
-                            ? u('Complete')
-                            : active
-                              ? `${selectedState?.beatProgress[beat.id] ?? 0} / ${beat.target}`
-                              : u('Coming next')}
-                        </Text>
-                        {completed && beat.milestone && beat.discovery && (
-                          <Text style={styles.discoveryText}>
-                            {beat.discovery[store.uiLanguage] ?? beat.discovery.en}
-                          </Text>
-                        )}
-                      </>
-                    ) : (
-                      <Text style={styles.fogText}>{u('A future Beat waits in the fog.')}</Text>
-                    )}
-                  </View>
+          {activePaths.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>{u('ACTIVE PATHS')}</Text>
+              <View style={styles.activeGrid}>
+                {activePaths.slice(0, 3).map((path) => {
+                  const state = store.progress.pathStates?.[path.id];
+                  const active = selectedPath.id === path.id;
+                  return (
+                    <Pressable
+                      key={path.id}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      onPress={() => selectPath(path.id)}
+                      style={[styles.activeCard, active && styles.activeCardSelected]}
+                    >
+                      <Ionicons name={pathIcon(path)} size={20} color={colors.primary} />
+                      <Text numberOfLines={2} style={styles.activeTitle}>
+                        {pathTitle(path, store.uiLanguage)}
+                      </Text>
+                      <ProgressBar value={pathProgressRatio(path, state)} color={colors.mint} />
+                      <Text style={styles.activeDetail}>
+                        {Math.round(pathProgressRatio(path, state) * 100)}% ·{' '}
+                        {(nextPathBeat(path, state) &&
+                          beatTitle(nextPathBeat(path, state)!, store.uiLanguage)) ??
+                          u('Path complete')}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          <View style={styles.selectedPath}>
+            <View style={styles.selectedTop}>
+              <View style={styles.selectedIcon}>
+                <Ionicons name={pathIcon(selectedPath)} size={26} color={colors.white} />
+              </View>
+              <View style={styles.selectedCopy}>
+                <Text style={styles.sourceLabel}>
+                  {pathTypeLabel(selectedPath, store.uiLanguage)} ·{' '}
+                  {selectedPath.source === 'curated' ? u('CURATED PATH') : u('YOUR PATH')}
+                </Text>
+                <Text style={styles.selectedTitle}>
+                  {pathTitle(selectedPath, store.uiLanguage)}
+                </Text>
+                <Text style={styles.selectedDetail}>
+                  {selectedState?.pathProgress ?? 0} / {pathTarget(selectedPath)} ·{' '}
+                  {selectedState?.status === 'completed'
+                    ? u('Path complete')
+                    : nextBeat
+                      ? `${u('Next')}: ${beatTitle(nextBeat, store.uiLanguage)}`
+                      : u('Ready to begin')}
+                </Text>
+                {selectedReference && (
+                  <Text style={styles.referenceDetail}>
+                    {selectedVersion?.abbreviation ?? selectedVersionId} ·{' '}
+                    {selectedVerses[0]?.bookName ?? selectedReference.bookId}{' '}
+                    {selectedReference.startChapter}:{selectedReference.startVerse}–
+                    {selectedPassageEnd?.chapter === selectedReference.startChapter
+                      ? selectedPassageEnd.verseEnd
+                      : `${selectedPassageEnd?.chapter ?? selectedReference.endChapter}:${selectedPassageEnd?.verseEnd ?? selectedReference.endVerse}`}
+                  </Text>
+                )}
+              </View>
+              <Text style={styles.percent}>{Math.round(ratio * 100)}%</Text>
+            </View>
+            <ProgressBar value={ratio} color={colors.gold} />
+            {selectedState && selectedState.status !== 'completed' && (
+              <View style={styles.resumeCard}>
+                <Text style={styles.resumeLabel}>{u('RESUME PATH')}</Text>
+                <Text style={styles.resumeText}>
+                  {pathResumeSummary(selectedPath, selectedState, store.uiLanguage)}
+                </Text>
+              </View>
+            )}
+            {!selectedState && (
+              <View style={styles.previewCard}>
+                <Text style={styles.previewTitle}>{u('PATH PREVIEW')}</Text>
+                <Text style={styles.previewText}>
+                  {selectedPath.beats?.length ?? 1} {u('Beats')} ·{' '}
+                  {selectedPath.beats?.filter((beat) => beat.milestone).length ?? 0}{' '}
+                  {u('milestones')}
+                </Text>
+                {selectedPath.beats?.slice(0, 3).map((beat, index) => (
+                  <Text key={beat.id} style={styles.previewStep}>
+                    {index + 1}. {beatTitle(beat, store.uiLanguage)}
+                  </Text>
+                ))}
+                <Button
+                  label={u('Start Path')}
+                  onPress={() => {
+                    store.startPath(selectedPath.id);
+                    store.focusPath(selectedPath.id);
+                  }}
+                />
+              </View>
+            )}
+            {selectedState?.status === 'completed' ? (
+              <View style={styles.completionCard}>
+                <Ionicons name="checkmark-circle" size={26} color={colors.mint} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.completionTitle}>{u('THIS GOAL IS COMPLETE')}</Text>
+                  <Text style={styles.completionText}>
+                    {u('Your completed journey remains here.')}
+                  </Text>
                 </View>
-              );
-            })}
+              </View>
+            ) : selectedState ? (
+              <Button
+                label={`${smartAction.label} · ${smartAction.detail}`}
+                onPress={performSmartAction}
+              />
+            ) : null}
+            {selectedState?.status !== 'completed' && (
+              <Button
+                label={showAlternatives ? u('Hide other activities') : u('Other activities')}
+                variant="ghost"
+                onPress={() => setShowAlternatives((value) => !value)}
+              />
+            )}
+            {showAlternatives && selectedState?.status !== 'completed' && (
+              <View style={styles.actions}>
+                <PathAction
+                  icon="book"
+                  label={u('READ')}
+                  detail={u('Calm progress')}
+                  disabled={!pathActivityVerses.length}
+                  onPress={() =>
+                    onRead({
+                      label: pathTitle(selectedPath, store.uiLanguage),
+                      versionId: selectedVersionId,
+                      verses: pathActivityVerses,
+                    })
+                  }
+                />
+                <PathAction
+                  icon="bulb"
+                  label={u('MEMORIZE')}
+                  detail={u('Focused recall')}
+                  disabled={!pathActivityVerses[0] && !nextVerse}
+                  onPress={() =>
+                    (pathActivityVerses[0] ?? nextVerse) &&
+                    onMemorize(pathActivityVerses[0] ?? nextVerse!)
+                  }
+                />
+                <PathAction
+                  icon="trophy"
+                  label={u('CHALLENGE')}
+                  detail={u('Risk · larger progress')}
+                  disabled={!pathActivityVerses.length}
+                  onPress={() => onChallenge(pathActivityVerses.slice(0, 5))}
+                />
+              </View>
+            )}
+            {selectedReference && !selectedVerses.length && (
+              <Text style={styles.unavailable}>
+                {u('Bible text unavailable for this version.')}
+              </Text>
+            )}
+
+            {visibleBeats.length ? (
+              <View style={styles.beatMap}>
+                {visibleBeats.map((beat, windowIndex) => {
+                  const index = beatWindowStart + windowIndex;
+                  const completed = selectedState?.completedBeatIds.includes(beat.id) ?? false;
+                  const active = selectedState?.activeBeatIds.includes(beat.id) ?? index === 0;
+                  const distance = index - selectedActiveIndex;
+                  const revealed = completed || active || distance <= 1;
+                  const partlyRevealed = !revealed && distance === 2;
+                  const beatRatio = Math.min(
+                    1,
+                    (selectedState?.beatProgress[beat.id] ?? 0) / Math.max(1, beat.target),
+                  );
+                  return (
+                    <View key={beat.id} style={styles.beatRow}>
+                      <View
+                        style={[
+                          styles.beatNode,
+                          completed && styles.beatNodeComplete,
+                          active && styles.beatNodeActive,
+                        ]}
+                      >
+                        <Ionicons
+                          name={completed ? 'checkmark' : active ? 'navigate' : 'lock-closed'}
+                          size={17}
+                          color={completed || active ? colors.white : colors.muted}
+                        />
+                      </View>
+                      <View style={[styles.beatCard, !revealed && styles.fogCard]}>
+                        <Text style={styles.beatTitle}>
+                          {beat.milestone && revealed ? '◆ ' : ''}
+                          {revealed
+                            ? beatTitle(beat, store.uiLanguage)
+                            : partlyRevealed
+                              ? `${beatTitle(beat, store.uiLanguage).slice(0, 8)}…`
+                              : '•••'}
+                        </Text>
+                        {revealed ? (
+                          <>
+                            <ProgressBar
+                              value={beatRatio}
+                              color={completed ? colors.mint : colors.gold}
+                            />
+                            <Text style={styles.beatDetail}>
+                              {completed
+                                ? u('Complete')
+                                : active
+                                  ? `${selectedState?.beatProgress[beat.id] ?? 0} / ${beat.target}`
+                                  : u('Coming next')}
+                            </Text>
+                            {completed && beat.milestone && beat.discovery && (
+                              <Text style={styles.discoveryText}>
+                                {beat.discovery[store.uiLanguage] ?? beat.discovery.en}
+                              </Text>
+                            )}
+                          </>
+                        ) : (
+                          <Text style={styles.fogText}>{u('A future Beat waits in the fog.')}</Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : !selectedPath.beats?.length ? (
+              <View style={styles.singleGoal}>
+                <Ionicons name="flag" size={21} color={colors.primary} />
+                <Text style={styles.singleGoalText}>
+                  {u('One focused goal — no extra Beats needed.')}
+                </Text>
+              </View>
+            ) : null}
           </View>
-        ) : !selectedPath.beats?.length ? (
-          <View style={styles.singleGoal}>
-            <Ionicons name="flag" size={21} color={colors.primary} />
-            <Text style={styles.singleGoalText}>
-              {u('One focused goal — no extra Beats needed.')}
-            </Text>
-          </View>
-        ) : null}
-      </View>
+        </>
+      )}
 
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>{u('BROWSE PATHS')}</Text>

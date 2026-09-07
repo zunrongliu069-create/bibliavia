@@ -179,14 +179,15 @@ export function SettingsScreen() {
               <>
                 <TextInput
                   value={emailCode}
-                  onChangeText={setEmailCode}
+                  onChangeText={(value) => setEmailCode(value.replace(/\D/g, '').slice(0, 6))}
                   placeholder={u('6-digit verification code')}
                   keyboardType="number-pad"
+                  maxLength={6}
                   style={styles.accountInput}
                 />
                 <Button
                   label={u('Verify and continue')}
-                  disabled={authBusy || emailCode.trim().length < 6}
+                  disabled={authBusy || !/^\d{6}$/.test(emailCode)}
                   onPress={() =>
                     runAuth(async () => {
                       const error = await auth.verifyEmailCode(email, emailCode, emailCodeMode);

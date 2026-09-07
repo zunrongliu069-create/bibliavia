@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { isBibleVersionEnabled, versesForTranslation } from '../data/content';
+import { getReferencedPassage, isBibleVersionEnabled, versesForTranslation } from '../data/content';
 import { characters } from '../data/characters';
 import { PERIOD_MASTERY_RATIO } from '../data/periods';
 import { readingPlanById } from '../data/readingPlans';
@@ -28,6 +28,8 @@ import { beatTitle, pathById, pathForBook, pathForReadingPlan, pathTitle } from 
 import {
   activatePath,
   applyActivityToProgress,
+  migrateStructuredPathState,
+  setCurrentPathNode as advanceToPathNode,
   type PathProgressResult,
 } from '../lib/pathProgress';
 import { pathRewardFor, type PathReward } from '../lib/pathRewards';
@@ -49,6 +51,7 @@ import type {
   UiLanguage,
   UserProgress,
   Verse,
+  VersePathLevel,
 } from '../types';
 
 type StoredState = {
@@ -154,7 +157,11 @@ interface AppStoreValue extends StoredState {
     activity: PathActivityType;
     quality?: number;
     success?: boolean;
+    completion?:
+      | { type: 'verse-level'; level: VersePathLevel }
+      | { type: 'chapter-part'; part: 'reading' | 'quiz' };
   }) => PathProgressResult | null;
+  selectPathNode: (pathId: string, beatId: string) => void;
   startPath: (pathId: string) => void;
   focusPath: (pathId: string) => void;
   createPath: (input: {
@@ -260,7 +267,13 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
           saved.progress.pathStates = Object.fromEntries(
             Object.entries(saved.progress.pathStates).map(([id, path]) => [
               id,
-              { ...path, lastActivityAt: path.lastActivityAt ?? null },
+              pathById(id)
+                ? migrateStructuredPathState(
+                    pathById(id)!,
+                    { ...path, lastActivityAt: path.lastActivityAt ?? null },
+                    saved.progress.completedLessonIds ?? [],
+                  )
+                : { ...path, lastActivityAt: path.lastActivityAt ?? null },
             ]),
           );
           saved.progress.activePathIds = saved.progress.activePathIds ?? [];
@@ -900,6 +913,22 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       })),
     [],
   );
+  const selectPathNode = useCallback((pathId: string, beatId: string) => {
+    setState((old) => {
+      const path = pathById(pathId) ?? old.progress.customPaths?.find((item) => item.id === pathId);
+      const current = old.progress.pathStates?.[pathId];
+      if (!path || !current) return old;
+      const next = advanceToPathNode(path, current, beatId);
+      return {
+        ...old,
+        progress: {
+          ...old.progress,
+          focusedPathId: pathId,
+          pathStates: { ...old.progress.pathStates, [pathId]: next },
+        },
+      };
+    });
+  }, []);
   const createPath: AppStoreValue['createPath'] = useCallback((input) => {
     const id = `user-${Date.now()}`;
     setState((old) => {
@@ -1017,19 +1046,33 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       });
       const first = items[0];
       if (first) {
-        const campaignId =
-          first.bookId === 'romans' || first.bookId === 'proverbs' ? first.bookId : null;
-        const defaultPath = campaignId ? pathForBook(campaignId, 'reading') : undefined;
-        const focusedPathId = state.progress.focusedPathId;
-        const pathId =
-          focusedPathId && state.progress.activePathIds?.includes(focusedPathId)
-            ? focusedPathId
-            : defaultPath?.id;
-        if (pathId)
+        const beatId = `${first.bookId}-${first.chapter}`;
+        const focusedPath = state.progress.focusedPathId
+          ? pathById(state.progress.focusedPathId)
+          : undefined;
+        const focusedHasChapter = focusedPath?.beats?.some((beat) => beat.id === beatId);
+        const defaultPath = pathForBook(first.bookId, 'reading');
+        const path =
+          focusedPath && focusedHasChapter && state.progress.activePathIds?.includes(focusedPath.id)
+            ? focusedPath
+            : defaultPath;
+        const pathId = path?.id;
+        const beat = path?.beats?.find((item) => item.id === beatId);
+        const expected = beat?.passage
+          ? getReferencedPassage(first.translationId, beat.passage)
+          : [];
+        const readIds = new Set(items.map((item) => item.id));
+        const completedChapter =
+          expected.length > 0 && expected.every((item) => readIds.has(item.id));
+        if (pathId && beat)
           recordPathActivity({
             pathId,
-            beatId: pathId === defaultPath?.id ? `${first.bookId}-${first.chapter}` : undefined,
+            beatId,
             activity: 'reading',
+            completion:
+              path?.structure === 'chapter' && completedChapter
+                ? { type: 'chapter-part', part: 'reading' }
+                : undefined,
           });
       }
     },
@@ -1203,6 +1246,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       recordPathActivity,
       startPath,
       focusPath,
+      selectPathNode,
       createPath,
       setUiLanguage,
       setTranslationId,
@@ -1243,6 +1287,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       recordPathActivity,
       startPath,
       focusPath,
+      selectPathNode,
       createPath,
       setUiLanguage,
       setTranslationId,

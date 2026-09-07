@@ -63,6 +63,13 @@ export function nextPathAction(
   }
   const beat = nextPathBeat(path, state) ?? path.beats?.[0];
   let activity: PathActivityType = path.kind === 'memorization' ? 'memorization' : 'reading';
+  if (
+    path.structure === 'chapter' &&
+    beat &&
+    state?.nodeProgress?.[beat.id]?.chapter?.readingCompleted &&
+    !state.nodeProgress[beat.id]?.chapter?.quizCompleted
+  )
+    activity = 'challenge';
   if (path.kind === 'mixed' && beat) {
     activity = !activityWasUsed(state, beat.id, 'reading')
       ? 'reading'

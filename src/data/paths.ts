@@ -1,123 +1,211 @@
-import type { CampaignId, PathDefinition, PathTone, UiLanguage } from '../types';
-import { curricula } from './curriculum';
-import { readingPlans } from './readingPlans';
-import { parseBibleReference } from '../lib/bibleLinks';
+import type {
+  BibleBookContent,
+  BiblePassageReference,
+  PathBeatDefinition,
+  PathDefinition,
+  UiLanguage,
+} from '../types';
+import { booksForVersion, canonicalBookIds } from './content';
+import { milestoneIndexes } from '../lib/pathWorld';
 
-const tones: Record<number, PathTone> = {
-  0: 'hopeful',
-  1: 'reflective',
-  2: 'solemn',
-  3: 'triumphant',
-};
-const bookTitles: Record<CampaignId, Record<UiLanguage, string>> = {
-  romans: { en: 'Romans', sv: 'Romarbrevet', 'zh-Hans': '罗马书', 'zh-Hant': '羅馬書' },
-  proverbs: { en: 'Proverbs', sv: 'Ordspråksboken', 'zh-Hans': '箴言', 'zh-Hant': '箴言' },
-};
+const languages: UiLanguage[] = ['en', 'sv', 'zh-Hans', 'zh-Hant'];
+const booksByVersion = Object.fromEntries(
+  ['webp', 'cuv-s', 'cuv-t'].map((versionId) => [
+    versionId,
+    new Map(booksForVersion(versionId).map((book) => [book.id, book])),
+  ]),
+) as Record<string, Map<string, BibleBookContent>>;
+const webBook = (bookId: string) => booksByVersion.webp!.get(bookId)!;
+const localizedBookTitles = (bookId: string): Partial<Record<UiLanguage, string>> => ({
+  en: webBook(bookId).name,
+  sv: webBook(bookId).name,
+  'zh-Hans': booksByVersion['cuv-s']!.get(bookId)?.name ?? webBook(bookId).name,
+  'zh-Hant': booksByVersion['cuv-t']!.get(bookId)?.name ?? webBook(bookId).name,
+});
+const passage = (
+  bookId: string,
+  startChapter: number,
+  startVerse: number,
+  endChapter = startChapter,
+  endVerse = startVerse,
+): BiblePassageReference => ({ bookId, startChapter, startVerse, endChapter, endVerse });
+const lastVerse = (bookId: string, chapter: number) =>
+  webBook(bookId)
+    .chapters.find((item) => item.number === chapter)!
+    .verses.at(-1)!.number;
 
-const curriculumPath = (
-  bookId: CampaignId,
-  activity: 'reading' | 'memorization',
-): PathDefinition => {
-  const curriculum = curricula.find((item) => item.id === bookId)!;
+const chapterBeat = (bookId: string, chapter: number, previousId?: string): PathBeatDefinition => {
+  const bookTitles = localizedBookTitles(bookId);
   return {
-    id: `${activity}-${bookId}`,
-    title: `${activity === 'reading' ? 'Read' : 'Memorize'} ${curriculum.title}`,
+    id: `${bookId}-${chapter}`,
+    title: `${bookTitles.en} ${chapter}`,
     titles: Object.fromEntries(
-      (['en', 'sv', 'zh-Hans', 'zh-Hant'] as UiLanguage[]).map((language) => [
-        language,
-        activity === 'reading'
-          ? `${language === 'sv' ? 'Läs' : language.startsWith('zh') ? '阅读' : 'Read'} ${bookTitles[bookId][language]}`
-          : `${language === 'sv' ? 'Memorera' : language.startsWith('zh') ? '背诵' : 'Memorize'} ${bookTitles[bookId][language]}`,
-      ]),
+      languages.map((language) => [language, `${bookTitles[language]} ${chapter}`]),
     ),
+    target: 1,
+    parentId: previousId,
+    nodeKind: 'content',
+    regionId: bookId,
+    passage: passage(bookId, chapter, 1, chapter, lastVerse(bookId, chapter)),
+  };
+};
+
+const chapterPath = (
+  id: string,
+  bookIds: string[],
+  titles: Record<UiLanguage, string>,
+): PathDefinition => {
+  const beats: PathBeatDefinition[] = [];
+  for (const bookId of bookIds) {
+    for (const chapter of webBook(bookId).chapters) {
+      beats.push(chapterBeat(bookId, chapter.number, beats.at(-1)?.id));
+    }
+  }
+  const milestones = new Set(milestoneIndexes(beats.length));
+  beats.forEach((beat, index) => {
+    beat.milestone = milestones.has(index);
+  });
+  return {
+    id,
+    title: titles.en,
+    titles,
     source: 'curated',
-    kind: activity,
-    beats: curriculum.chapters.map((chapter, index) => ({
-      id: `${bookId}-${chapter.chapter}`,
-      title: `${curriculum.title} ${chapter.chapter}`,
-      titles: Object.fromEntries(
-        (['en', 'sv', 'zh-Hans', 'zh-Hant'] as UiLanguage[]).map((language) => [
-          language,
-          `${bookTitles[bookId][language]} ${chapter.chapter}`,
-        ]),
-      ),
-      target: activity === 'reading' ? 30 : 100,
-      parentId: index ? `${bookId}-${curriculum.chapters[index - 1]!.chapter}` : undefined,
-      tone: tones[index % 4],
-      milestone:
-        (index + 1) % Math.max(1, Math.ceil(curriculum.chapters.length / 4)) === 0 ||
-        index === curriculum.chapters.length - 1,
-      discovery: {
-        en: 'A new part of the journey is revealed.',
-        sv: 'En ny del av resan har avslöjats.',
-        'zh-Hans': '旅程的新篇章已揭晓。',
-        'zh-Hant': '旅程的新篇章已揭曉。',
-      },
-      passage: {
-        bookId,
-        startChapter: chapter.chapter,
-        startVerse: 1,
-        endChapter: chapter.chapter,
-        endVerse: 999,
-      },
+    kind: 'reading',
+    structure: 'chapter',
+    beats,
+    regions: bookIds.map((bookId) => ({
+      id: bookId,
+      title: localizedBookTitles(bookId).en!,
+      titles: localizedBookTitles(bookId),
     })),
   };
 };
 
-export const scripturePaths: PathDefinition[] = curricula.flatMap((curriculum) => [
-  curriculumPath(curriculum.id, 'reading'),
-  curriculumPath(curriculum.id, 'memorization'),
-]);
-
-export const readingPlanPaths: PathDefinition[] = readingPlans.map((plan) => ({
-  id: `reading-plan-${plan.id}`,
-  title: plan.title.en,
-  titles: plan.title,
-  source: 'curated',
-  kind: 'reading',
-  beats: plan.days.map((day, index) => ({
-    id: `${plan.id}-day-${day.day}`,
-    title: `Day ${day.day}`,
+const versePath = (
+  id: string,
+  reference: BiblePassageReference,
+  titles: Record<UiLanguage, string>,
+): PathDefinition => {
+  const book = webBook(reference.bookId);
+  const locatedVerses = book.chapters.flatMap((chapter) =>
+    chapter.number < reference.startChapter || chapter.number > reference.endChapter
+      ? []
+      : chapter.verses
+          .filter(
+            (verse) =>
+              (chapter.number > reference.startChapter || verse.number >= reference.startVerse) &&
+              (chapter.number < reference.endChapter || verse.number <= reference.endVerse),
+          )
+          .map((verse) => ({ chapter: chapter.number, verse: verse.number })),
+  );
+  const beats: PathBeatDefinition[] = locatedVerses.map((location, index) => ({
+    id: `${book.id}-${location.chapter}-${location.verse}`,
+    title: `${book.name} ${location.chapter}:${location.verse}`,
+    target: 1,
+    parentId:
+      index > 0
+        ? `${book.id}-${locatedVerses[index - 1]!.chapter}-${locatedVerses[index - 1]!.verse}`
+        : undefined,
+    nodeKind: 'content',
+    regionId: `${book.id}-${location.chapter}`,
+    passage: passage(book.id, location.chapter, location.verse),
+  }));
+  beats.push({
+    id: `${id}-final-boss`,
+    title: 'Final Boss',
     titles: {
-      en: `Day ${day.day}`,
-      sv: `Dag ${day.day}`,
-      'zh-Hans': `第 ${day.day} 天`,
-      'zh-Hant': `第 ${day.day} 天`,
+      en: 'Final Boss',
+      sv: 'Slutboss',
+      'zh-Hans': '最终挑战',
+      'zh-Hant': '最終挑戰',
     },
-    target: 15,
-    parentId: index ? `${plan.id}-day-${plan.days[index - 1]!.day}` : undefined,
-    tone: 'reflective',
-    milestone:
-      (index + 1) % Math.max(1, Math.ceil(plan.days.length / 4)) === 0 ||
-      index === plan.days.length - 1,
-    discovery: {
-      en: 'A new part of the journey is revealed.',
-      sv: 'En ny del av resan har avslöjats.',
-      'zh-Hans': '旅程的新篇章已揭晓。',
-      'zh-Hant': '旅程的新篇章已揭曉。',
-    },
-    passages: plan.days[index]!.references.en.flatMap((reference) => {
-      const target = parseBibleReference(reference);
-      return target
-        ? [
-            {
-              bookId: target.bookId,
-              startChapter: target.chapter,
-              startVerse: target.verseStart ?? 1,
-              endChapter: target.chapter,
-              endVerse: target.verseEnd ?? 999,
-            },
-          ]
-        : [];
-    }),
-  })),
-}));
+    target: 1,
+    parentId: beats.at(-1)?.id,
+    nodeKind: 'final-boss',
+    boss: { kind: 'final-boss', coverage: [reference] },
+  });
+  const milestones = new Set(milestoneIndexes(beats.length));
+  beats.forEach((beat, index) => {
+    beat.milestone = milestones.has(index);
+  });
+  const chapters = Array.from(
+    { length: reference.endChapter - reference.startChapter + 1 },
+    (_, index) => reference.startChapter + index,
+  );
+  return {
+    id,
+    title: titles.en,
+    titles,
+    source: 'curated',
+    kind: 'memorization',
+    structure: 'verse',
+    beats,
+    regions: chapters.map((chapter) => ({
+      id: `${book.id}-${chapter}`,
+      title: `${book.name} ${chapter}`,
+    })),
+  };
+};
 
-export const pathDefinitions = [...scripturePaths, ...readingPlanPaths];
+const newTestamentBookIds = canonicalBookIds.slice(canonicalBookIds.indexOf('matthew'));
+
+export const pathDefinitions: PathDefinition[] = [
+  chapterPath('reading-mark', ['mark'], {
+    en: 'Short Reading — Mark',
+    sv: 'Kort läsning — Markusevangeliet',
+    'zh-Hans': '短篇阅读 — 马可福音',
+    'zh-Hant': '短篇閱讀 — 馬可福音',
+  }),
+  chapterPath('reading-luke', ['luke'], {
+    en: 'Medium Reading — Luke',
+    sv: 'Medellång läsning — Lukasevangeliet',
+    'zh-Hans': '中篇阅读 — 路加福音',
+    'zh-Hant': '中篇閱讀 — 路加福音',
+  }),
+  chapterPath('reading-new-testament', newTestamentBookIds, {
+    en: 'Long Reading — The New Testament',
+    sv: 'Lång läsning — Hela Nya testamentet',
+    'zh-Hans': '长篇阅读 — 整本新约',
+    'zh-Hant': '長篇閱讀 — 整本新約',
+  }),
+  versePath('memorization-psalm-23', passage('psalms', 23, 1, 23, lastVerse('psalms', 23)), {
+    en: 'Short Memorization — Psalm 23',
+    sv: 'Kort memorering — Psalm 23',
+    'zh-Hans': '短篇背诵 — 诗篇 23',
+    'zh-Hant': '短篇背誦 — 詩篇 23',
+  }),
+  versePath('memorization-matthew-5-7', passage('matthew', 5, 1, 7, lastVerse('matthew', 7)), {
+    en: 'Medium Memorization — Matthew 5–7',
+    sv: 'Medellång memorering — Matteus 5–7',
+    'zh-Hans': '中篇背诵 — 马太福音 5–7',
+    'zh-Hant': '中篇背誦 — 馬太福音 5–7',
+  }),
+  versePath('memorization-romans', passage('romans', 1, 1, 16, lastVerse('romans', 16)), {
+    en: 'Long Memorization — Romans 1–16',
+    sv: 'Lång memorering — Romarbrevet 1–16',
+    'zh-Hans': '长篇背诵 — 罗马书 1–16',
+    'zh-Hant': '長篇背誦 — 羅馬書 1–16',
+  }),
+];
+
+export const scripturePaths = pathDefinitions;
+export const readingPlanPaths: PathDefinition[] = [];
 export const pathById = (id: string) => pathDefinitions.find((path) => path.id === id);
-export const pathForBook = (bookId: CampaignId, activity: 'reading' | 'memorization') =>
-  pathById(`${activity}-${bookId}`)!;
-export const pathForReadingPlan = (planId: string) => pathById(`reading-plan-${planId}`)!;
+export const pathForBook = (
+  bookId: string,
+  activity: 'reading' | 'memorization',
+): PathDefinition | undefined =>
+  pathDefinitions.find(
+    (path) =>
+      path.kind === activity &&
+      path.beats?.some((beat) => beat.nodeKind === 'content' && beat.passage?.bookId === bookId),
+  );
+export const pathForReadingPlan = (planId: string): PathDefinition | undefined =>
+  planId === 'mark-16'
+    ? pathById('reading-mark')
+    : planId === 'nt-90'
+      ? pathById('reading-new-testament')
+      : undefined;
 export const pathTitle = (path: PathDefinition, language: UiLanguage) =>
   path.titles?.[language] ?? path.title;
 export const beatTitle = (

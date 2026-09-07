@@ -25,4 +25,18 @@ describe('Path guidance', () => {
     const state = { ...createPathState(path), pathProgress: 5 } as PathState;
     expect(pathResumeSummary(path, state, 'sv')).toContain('50% · Läs nästa: First Beat');
   });
+
+  it('recommends the chapter quiz after reading is complete', () => {
+    const chapterPath: PathDefinition = {
+      id: 'chapter',
+      title: 'Chapter',
+      source: 'curated',
+      kind: 'reading',
+      structure: 'chapter',
+      beats: [{ id: 'chapter-1', title: 'Chapter 1', target: 1, nodeKind: 'content' }],
+    };
+    const state = createPathState(chapterPath);
+    state.nodeProgress!['chapter-1']!.chapter!.readingCompleted = true;
+    expect(nextPathAction(chapterPath, state, 'en').activity).toBe('challenge');
+  });
 });
