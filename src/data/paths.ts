@@ -7,6 +7,7 @@ import type {
 } from '../types';
 import { booksForVersion, canonicalBookIds } from './content';
 import { milestoneIndexes } from '../lib/pathWorld';
+import { readingChapterForBeat } from './readingChapters';
 
 const languages: UiLanguage[] = ['en', 'sv', 'zh-Hans', 'zh-Hant'];
 const booksByVersion = Object.fromEntries(
@@ -36,6 +37,7 @@ const lastVerse = (bookId: string, chapter: number) =>
 
 const chapterBeat = (bookId: string, chapter: number, previousId?: string): PathBeatDefinition => {
   const bookTitles = localizedBookTitles(bookId);
+  const reading = readingChapterForBeat(`${bookId}-${chapter}`);
   return {
     id: `${bookId}-${chapter}`,
     title: `${bookTitles.en} ${chapter}`,
@@ -47,6 +49,10 @@ const chapterBeat = (bookId: string, chapter: number, previousId?: string): Path
     nodeKind: 'content',
     regionId: bookId,
     passage: passage(bookId, chapter, 1, chapter, lastVerse(bookId, chapter)),
+    sections: reading?.sections,
+    reading: reading
+      ? { estimatedMinutes: reading.estimatedMinutes, recap: reading.recap }
+      : undefined,
   };
 };
 

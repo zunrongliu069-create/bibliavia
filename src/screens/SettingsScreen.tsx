@@ -55,9 +55,8 @@ export function SettingsScreen() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [email, setEmail] = useState('');
-  const [emailCode, setEmailCode] = useState('');
-  const [emailCodeMode, setEmailCodeMode] = useState<EmailCodeMode>('connect');
-  const [codeSent, setCodeSent] = useState(false);
+  const [emailLinkMode, setEmailLinkMode] = useState<EmailCodeMode>('connect');
+  const [linkSent, setLinkSent] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const authBusyRef = useRef(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
@@ -147,17 +146,17 @@ export function SettingsScreen() {
               keyboardType="email-address"
               style={styles.accountInput}
             />
-            {!codeSent ? (
+            {!linkSent ? (
               <>
                 <Button
                   label={u('Connect Bibliavia ID')}
                   disabled={authBusy || !email.includes('@')}
                   onPress={() =>
                     runAuth(async () => {
-                      setEmailCodeMode('connect');
-                      const error = await auth.requestEmailCode(email, 'connect');
-                      if (!error) setCodeSent(true);
-                      return error ?? u('Verification code sent');
+                      setEmailLinkMode('connect');
+                      const error = await auth.requestEmailLink(email, 'connect');
+                      if (!error) setLinkSent(true);
+                      return error ?? u('Check your inbox and open the sign-in link.');
                     })
                   }
                 />
@@ -167,42 +166,33 @@ export function SettingsScreen() {
                   disabled={authBusy || !email.includes('@')}
                   onPress={() =>
                     runAuth(async () => {
-                      setEmailCodeMode('login');
-                      const error = await auth.requestEmailCode(email, 'login');
-                      if (!error) setCodeSent(true);
-                      return error ?? u('Verification code sent');
+                      setEmailLinkMode('login');
+                      const error = await auth.requestEmailLink(email, 'login');
+                      if (!error) setLinkSent(true);
+                      return error ?? u('Check your inbox and open the sign-in link.');
                     })
                   }
                 />
               </>
             ) : (
               <>
-                <TextInput
-                  value={emailCode}
-                  onChangeText={(value) => setEmailCode(value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder={u('6-digit verification code')}
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  style={styles.accountInput}
-                />
+                <Text style={styles.authNotice}>
+                  {u('Check your inbox and open the sign-in link.')}
+                </Text>
                 <Button
-                  label={u('Verify and continue')}
-                  disabled={authBusy || !/^\d{6}$/.test(emailCode)}
+                  label={u('Send a new link')}
+                  disabled={authBusy}
                   onPress={() =>
                     runAuth(async () => {
-                      const error = await auth.verifyEmailCode(email, emailCode, emailCodeMode);
-                      if (!error) {
-                        setCodeSent(false);
-                        setEmailCode('');
-                      }
-                      return error;
+                      const error = await auth.requestEmailLink(email, emailLinkMode);
+                      return error ?? u('A fresh sign-in link has been sent.');
                     })
                   }
                 />
                 <Button
                   label={u('Use another email')}
                   variant="ghost"
-                  onPress={() => setCodeSent(false)}
+                  onPress={() => setLinkSent(false)}
                 />
               </>
             )}

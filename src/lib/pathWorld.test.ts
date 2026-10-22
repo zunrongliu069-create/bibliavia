@@ -5,9 +5,20 @@ import {
   milestoneIndexes,
   pathWorldFor,
   regionForChapter,
+  travelerPositionBetween,
 } from './pathWorld';
 
 describe('path world configuration', () => {
+  it('moves within a chapter without reaching the next node early', () => {
+    expect(travelerPositionBetween({ x: 20, y: 40 }, { x: 120, y: 80 }, 0.5)).toEqual({
+      x: 62.5,
+      y: 57,
+    });
+    expect(travelerPositionBetween({ x: 20, y: 40 }, { x: 120, y: 80 }, 1)).toEqual({
+      x: 105,
+      y: 74,
+    });
+  });
   it.each([
     [3, 1],
     [7, 2],

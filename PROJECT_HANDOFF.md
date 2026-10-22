@@ -173,14 +173,18 @@ Automatic grade: accuracy < 0.55 = Again; accuracy < 0.82 or at least 2 hints = 
 - Framework: Expo-managed React Native app with React Native Web and TypeScript.
 - Navigation: custom tab/overlay state in `App.tsx`; no routing library. Review is a full-app overlay.
 - Database: none. One versioned JSON state object in AsyncStorage.
-- Authentication: none.
+- Authentication: none in Path Design 1.0. Auth is deliberately deferred so it cannot block Path design or QA.
+- Planned auth: a minimal Supabase magic-link flow only — email -> “Check your inbox” -> click link -> signed in. No code-input step is planned.
 - State management: React Context/reducer-style actions in `AppStore.tsx`; persistence key `scriptora/state/v2`, with migrations from `scriptora/state/v1` and `memora/state/v3`.
 - Backend: none.
 - APIs: no application API. External browser links for unavailable Bible passages; browser Web Speech APIs for TTS/STT.
 - Storage: AsyncStorage; reviews capped at 500, reward history at 100. Character/path images bundled locally.
 - Important packages: Expo, React/React Native, AsyncStorage, Expo Localization/Font/StatusBar, Safe Area Context, Expo Vector Icons, Vitest.
 - Environment variables: none currently.
-- Build/deployment: `npm start`, `npm run web|ios|android`, `npm run typecheck`, `npm test`. Bibliavia web uses `http://localhost:8081`. Port 8082 belongs to Open WebUI and must never be used for Bibliavia. Before starting another Expo process, first open or check the existing server on port 8081. No production hosting/release pipeline is configured.
+- Development-only Romans QA navigator: `Region / Chapter / Verse / State / Jump`. It can preview any Romans node plus Locked, Available, Current, Completed, Milestone, Guardian and Boss states without writing to saved Learn/Practice/Master or Path progress. It is isolated behind `PATH_DEBUG_ENABLED`/`__DEV__` and must remain disabled in release builds.
+- Build/deployment: `npm start`, `npm run web|ios|android`, `npm run typecheck`, `npm test`. Bibliavia web uses `http://localhost:8081`. Port 8082 belongs to Open WebUI and must never be used for Bibliavia. Before starting another Expo process, first open or check the existing server on port 8081.
+- Verified external connections (2026-09-10): GitHub MCP has push/admin access to the public repository `zunrongliu069-create/bibliavia`; local `origin` points to that repository and the default/current branch is `main`. Cloudflare MCP has access to the Pages project `bibliavia` at `https://bibliavia.pages.dev`, configured with `npm run build:web` and output directory `dist`; its latest production deployment reported success.
+- Deployment-mode note: the Cloudflare Pages project currently reports no Git source (`source: null`), so GitHub-triggered deployment is not connected or verified. Its current direct-upload deployment and MCP access are separate from local Wrangler CLI authentication. Never record MCP credentials, account IDs, tokens or other secrets in project files.
 
 ## 12. FILE STRUCTURE
 
@@ -246,19 +250,21 @@ Core logic tests are colocated as `src/**/*.test.ts`.
 | P0       | Create a clean version-control baseline before large edits; the working tree has extensive uncommitted tracked and untracked work. Do not discard user files.    |
 | P0       | Prevent Bibel 2000 from entering any public/release bundle until written digital permission exists; reverify CUV release status.                                 |
 | Done     | Define unified Path/Beat state and progression across Reading, Memorization, Review and Challenge, including same-day diminishing returns that never reach zero. |
-| Done     | Connect Reading, Memorization, Review and Challenge completion flows to generalized Path progression and surface typed feedback events.                        |
+| Done     | Connect Reading, Memorization, Review and Challenge completion flows to generalized Path progression and surface typed feedback events.                          |
 | Done     | Reconcile current characters/shards with transformative Heroes and extremely rare, gameplay-only, non-purchasable Fragments before expanding the economy.        |
 | Done     | Add word-level answer diff and localized, mode-specific mistake feedback.                                                                                        |
 | P1       | Replace Path's direct Skip Ahead with a real recall placement challenge and separately label skipped vs mastered content.                                        |
-| Done     | Complete the shared local Bible data/import pipeline so every WEB/CUV reading-plan reference opens in-app instead of using an external fallback.                    |
+| Done     | Complete the shared local Bible data/import pipeline so every WEB/CUV reading-plan reference opens in-app instead of using an external fallback.                 |
 | P1       | Define and implement character reading/reference quest requirements without changing current rarity/cost rules without approval.                                 |
 | P1       | Add end-to-end tests for every button and the complete Today/Path -> lesson -> checkpoint -> chest -> next verse flow.                                           |
-| P1       | Keep result/continue actions visible and perform a full keyboard, screen-reader, text-scaling and contrast accessibility review.                                    |
-| Done     | Add separate audio, ambient, haptics and Reduce Motion controls plus non-color-only, skippable feedback.                                                            |
+| P1       | Keep result/continue actions visible and perform a full keyboard, screen-reader, text-scaling and contrast accessibility review.                                 |
+| Done     | Add separate audio, ambient, haptics and Reduce Motion controls plus non-color-only, skippable feedback.                                                         |
+| Done     | Add a development-only Romans Path navigator for chapter, verse/node and visual-state QA without mutating real progression.                                      |
+| Deferred | Add Supabase email magic-link authentication after Path Design 1.0; auth must not block current Path iteration.                                                  |
 | P2       | Replace unreliable browser TTS/STT with licensed/cross-platform audio and speech services, then restore listening exercises.                                     |
 | P2       | Implement actual boss/chapter challenges and improve Path progress semantics.                                                                                    |
 | P2       | Split the single large store and state blob into modular domains before backend/cloud sync work.                                                                 |
-| P2       | Configure production build, hosting, monitoring and release checks.                                                                                              |
+| P2       | Connect or replace the current direct-upload Cloudflare Pages project with an approved GitHub-triggered pipeline; add monitoring and release checks.                  |
 | P3       | Museum, Skill Tree and approved social features after core retention is validated.                                                                               |
 
 ## 15. KNOWN BUGS / PROBLEMS

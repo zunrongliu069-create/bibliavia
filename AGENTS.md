@@ -12,5 +12,7 @@ For every new request:
 8. Use browser inspection only when visual behavior cannot be verified from code and tests.
 9. Keep rules and probabilities in typed configuration objects, not JSX.
 10. Keep progress updates and final responses extremely short unless details are requested.
+11. For every task involving a service with a connected MCP — including GitHub, Cloudflare and Supabase — check the relevant MCP connection and current remote state first. Do not use CLI, browser automation, deployment commands, or assumptions before that check; MCP access and local CLI authentication are separate.
+12. After finishing Bibliavia work, verify the local server responds at `http://localhost:8081/`; start it if needed, then open the app and leave it visible for the user.
 
 Before any potentially large operation, choose the lower-token alternative. Avoid repeated checks, failed speculative patches, broad file dumps, duplicate components, and full-project formatting.

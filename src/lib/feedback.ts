@@ -1,5 +1,16 @@
 import type { FeedbackEvent, FeedbackEventType, FeedbackSettings, PathTone } from '../types';
 
+export function progressFeedbackTier(input: {
+  verseLevel?: 'learn' | 'practice' | 'master';
+  completedChapter?: boolean;
+  pathCompleted?: boolean;
+}): 1 | 2 | 3 | 4 {
+  if (input.pathCompleted) return 4;
+  if (input.completedChapter || input.verseLevel === 'master') return 3;
+  if (input.verseLevel) return 2;
+  return 1;
+}
+
 export interface FeedbackPresentation {
   durationMs: number;
   intensity: number;

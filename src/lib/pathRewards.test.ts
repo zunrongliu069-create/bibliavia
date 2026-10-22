@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { PathDefinition } from '../types';
-import { applyPathActivity, createPathState } from './pathProgress';
+import type { PathDefinition, UserProgress } from '../types';
+import { applyActivityToProgress, applyPathActivity, createPathState } from './pathProgress';
 import { pathRewardFor } from './pathRewards';
 
 describe('Path rewards', () => {
@@ -43,5 +43,43 @@ describe('Path rewards', () => {
       at: new Date('2026-08-31T10:00:00Z'),
     });
     expect(pathRewardFor(path, result)).toEqual({ xp: 1, gold: 0, fragments: 0 });
+  });
+
+  it('awards chapter completion XP once when reading and recap are complete', () => {
+    const path: PathDefinition = {
+      id: 'reading-path',
+      title: 'Reading Path',
+      source: 'curated',
+      kind: 'reading',
+      structure: 'chapter',
+      beats: [
+        { id: 'mark-1', title: 'Mark 1', target: 1, nodeKind: 'content' },
+        { id: 'mark-2', title: 'Mark 2', target: 1, nodeKind: 'content', parentId: 'mark-1' },
+      ],
+    };
+    const reading = applyActivityToProgress({} as UserProgress, path, {
+      activity: 'reading',
+      beatId: 'mark-1',
+      completion: { type: 'chapter-part', part: 'reading' },
+      at: new Date('2026-09-15T10:00:00Z'),
+    });
+    const completion = applyActivityToProgress(reading.progress, path, {
+      activity: 'challenge',
+      beatId: 'mark-1',
+      completion: { type: 'chapter-part', part: 'quiz' },
+      success: true,
+      at: new Date('2026-09-15T10:05:00Z'),
+    });
+
+    expect(pathRewardFor(path, completion.result)).toEqual({ xp: 10, gold: 0, fragments: 0 });
+
+    const replay = applyActivityToProgress(completion.progress, path, {
+      activity: 'challenge',
+      beatId: 'mark-1',
+      completion: { type: 'chapter-part', part: 'quiz' },
+      success: true,
+      at: new Date('2026-09-15T10:10:00Z'),
+    });
+    expect(pathRewardFor(path, replay.result)).toEqual({ xp: 0, gold: 0, fragments: 0 });
   });
 });

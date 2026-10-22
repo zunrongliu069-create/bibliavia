@@ -24,7 +24,14 @@ import {
 import { achievementsFor } from '../lib/achievements';
 import { heroCapacity, heroSlotCost } from '../lib/heroSlots';
 import { journeyBeatById } from '../data/journeyBeats';
-import { beatTitle, pathById, pathForBook, pathForReadingPlan, pathTitle } from '../data/paths';
+import {
+  beatTitle,
+  pathById,
+  pathDefinitions,
+  pathForBook,
+  pathForReadingPlan,
+  pathTitle,
+} from '../data/paths';
 import {
   activatePath,
   applyActivityToProgress,
@@ -34,8 +41,17 @@ import {
 } from '../lib/pathProgress';
 import { pathRewardFor, type PathReward } from '../lib/pathRewards';
 import { nextPathAction } from '../lib/pathGuidance';
+import { progressFeedbackTier } from '../lib/feedback';
+import { withReadingSession } from '../lib/readingFlow';
 import { supabase } from '../lib/supabase';
 import { uiText } from '../lib/uiText';
+import {
+  createInitialPreferences,
+  isHydratedForIdentity,
+  normalizeUiLanguage,
+  parsePersistedJson,
+  reconcilePersistedJourney,
+} from '../lib/appInitialization';
 import { useAuthStore } from './AuthStore';
 import type {
   CampaignId,
@@ -47,6 +63,7 @@ import type {
   BiblePassageReference,
   PathActivityType,
   ReviewGrade,
+  ReadingSessionState,
   ShopItem,
   UiLanguage,
   UserProgress,
@@ -112,8 +129,7 @@ const makeProgress = (): UserProgress => ({
 export const createInitialProgress = (): UserProgress => makeProgress();
 const initialState = (): StoredState => ({
   version: 2,
-  uiLanguage: 'zh-Hans',
-  translationId: 'cuv-s',
+  ...createInitialPreferences(),
   feedbackSettings: {
     soundEffects: true,
     ambientMusic: false,
@@ -159,9 +175,11 @@ interface AppStoreValue extends StoredState {
     success?: boolean;
     completion?:
       | { type: 'verse-level'; level: VersePathLevel }
-      | { type: 'chapter-part'; part: 'reading' | 'quiz' };
+      | { type: 'chapter-part'; part: 'reading' | 'quiz' }
+      | { type: 'boss-challenge' };
   }) => PathProgressResult | null;
   selectPathNode: (pathId: string, beatId: string) => void;
+  setReadingSession: (pathId: string, beatId: string, session: ReadingSessionState) => void;
   startPath: (pathId: string) => void;
   focusPath: (pathId: string) => void;
   createPath: (input: {
@@ -216,17 +234,18 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   const cloudUserId = auth.session?.user.id;
   const [state, setState] = useState<StoredState>(initialState);
   const [feedbackEvent, setFeedbackEvent] = useState<FeedbackEvent | null>(null);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedUserId, setHydratedUserId] = useState<string | null>(null);
+  const hydrated = isHydratedForIdentity(auth.ready, userId, hydratedUserId);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<AppStoreValue['cloudSyncStatus']>('guest');
 
   useEffect(() => {
     let cancelled = false;
     const client = supabase;
-    setHydrated(false);
+    setHydratedUserId(null);
     setState(initialState());
     if (!userId) {
       setCloudSyncStatus('guest');
-      setHydrated(true);
+      setHydratedUserId(userId);
       return () => {
         cancelled = true;
       };
@@ -235,10 +254,34 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       setCloudSyncStatus('guest');
       void AsyncStorage.getItem(`bibliavia/state/v3/${userId}`)
         .then((raw) => {
-          if (raw && !cancelled) setState(JSON.parse(raw) as StoredState);
+          if (cancelled) return;
+          const saved = parsePersistedJson<StoredState>(raw);
+          if (!saved) return;
+          const preferences = createInitialPreferences();
+          saved.uiLanguage = normalizeUiLanguage(saved.uiLanguage);
+          saved.translationId = isBibleVersionEnabled(saved.translationId)
+            ? saved.translationId
+            : preferences.translationId;
+          saved.progress = reconcilePersistedJourney(
+            saved.progress,
+            pathDefinitions.map((path) => path.id),
+          ) as UserProgress;
+          saved.progress.pathStates = Object.fromEntries(
+            Object.entries(saved.progress.pathStates ?? {}).map(([id, path]) => [
+              id,
+              pathById(id)
+                ? migrateStructuredPathState(
+                    pathById(id)!,
+                    { ...path, lastActivityAt: path.lastActivityAt ?? null },
+                    saved.progress.completedLessonIds ?? [],
+                  )
+                : { ...path, lastActivityAt: path.lastActivityAt ?? null },
+            ]),
+          );
+          setState(saved);
         })
         .finally(() => {
-          if (!cancelled) setHydrated(true);
+          if (!cancelled) setHydratedUserId(userId);
         });
       return () => {
         cancelled = true;
@@ -254,9 +297,13 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       })
       .then(([currentRaw, previousRaw, legacyRaw]) => {
         const raw = currentRaw ?? previousRaw ?? legacyRaw;
-        if (raw) {
-          const saved = { ...(JSON.parse(raw) as StoredState), version: 2 as const };
-          if (!isBibleVersionEnabled(saved.translationId)) saved.translationId = 'cuv-s';
+        const parsed = parsePersistedJson<StoredState>(raw);
+        if (parsed) {
+          const saved = { ...parsed, version: 2 as const };
+          const preferences = createInitialPreferences();
+          saved.uiLanguage = normalizeUiLanguage(saved.uiLanguage);
+          if (!isBibleVersionEnabled(saved.translationId))
+            saved.translationId = preferences.translationId;
           saved.feedbackSettings = saved.feedbackSettings ?? {
             soundEffects: true,
             ambientMusic: false,
@@ -276,12 +323,14 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
                 : { ...path, lastActivityAt: path.lastActivityAt ?? null },
             ]),
           );
-          saved.progress.activePathIds = saved.progress.activePathIds ?? [];
           saved.progress.customPaths = (saved.progress.customPaths ?? []).map((path) => ({
             ...path,
             kind: path.kind ?? 'mixed',
           }));
-          saved.progress.focusedPathId = saved.progress.focusedPathId ?? null;
+          saved.progress = reconcilePersistedJourney(
+            saved.progress,
+            pathDefinitions.map((path) => path.id),
+          ) as UserProgress;
           saved.progress.pathChapter = saved.progress.pathChapter ?? { romans: 1, proverbs: 1 };
           if ((saved.progress.chapterOneStartVersion ?? 0) < 1) {
             saved.progress.pathChapter = { ...saved.progress.pathChapter, romans: 1, proverbs: 1 };
@@ -413,7 +462,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) setCloudSyncStatus('error');
       })
       .finally(() => {
-        if (!cancelled) setHydrated(true);
+        if (!cancelled) setHydratedUserId(userId);
       });
     return () => {
       cancelled = true;
@@ -929,6 +978,25 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       };
     });
   }, []);
+  const setReadingSession = useCallback(
+    (pathId: string, beatId: string, session: ReadingSessionState) => {
+      setState((old) => {
+        const current = old.progress.pathStates?.[pathId];
+        if (!current) return old;
+        return {
+          ...old,
+          progress: {
+            ...old.progress,
+            pathStates: {
+              ...old.progress.pathStates,
+              [pathId]: withReadingSession(current, beatId, session),
+            },
+          },
+        };
+      });
+    },
+    [],
+  );
   const createPath: AppStoreValue['createPath'] = useCallback((input) => {
     const id = `user-${Date.now()}`;
     setState((old) => {
@@ -984,11 +1052,15 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         (item) => item.id === completedBeat || item.id === input.beatId,
       );
       const nextAction = nextPathAction(path, result.state, state.uiLanguage);
+      const completedLevel =
+        result.appliedProgress > 0 && input.completion?.type === 'verse-level'
+          ? input.completion.level
+          : undefined;
       const type = pathReward.fragments
         ? 'FRAGMENT_REVEALED'
         : result.pathCompleted
           ? 'PATH_COMPLETED'
-          : completedBeat
+          : completedBeat || completedLevel === 'master'
             ? 'BEAT_COMPLETED'
             : result.feedback === 'partial'
               ? 'ACTIVITY_PARTIAL'
@@ -996,18 +1068,33 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       setFeedbackEvent({
         id: `${type}-${now.getTime()}`,
         type,
-        tier: pathReward.fragments ? 4 : result.pathCompleted ? 3 : completedBeat ? 2 : 1,
+        tier: pathReward.fragments
+          ? 4
+          : progressFeedbackTier({
+              verseLevel: completedLevel,
+              completedChapter: Boolean(completedBeat && path.structure === 'chapter'),
+              pathCompleted: result.pathCompleted,
+            }),
         tone: beat?.tone ?? 'reflective',
         message:
           (pathReward.fragments
             ? `${uiText(state.uiLanguage, 'Fragment revealed')} · ${pathTitle(path, state.uiLanguage)}`
             : result.pathCompleted
               ? `${pathTitle(path, state.uiLanguage)} · ${uiText(state.uiLanguage, 'Path complete')}`
-              : completedBeat
-                ? `${beat ? beatTitle(beat, state.uiLanguage) : 'Beat'} · ${uiText(state.uiLanguage, 'Complete')}`
-                : result.feedback === 'partial'
-                  ? uiText(state.uiLanguage, 'Partial success')
-                  : `+${result.appliedProgress} ${uiText(state.uiLanguage, 'Path progress')}`) +
+              : completedLevel
+                ? `${beat ? beatTitle(beat, state.uiLanguage) : 'Verse'} · ${uiText(
+                    state.uiLanguage,
+                    completedLevel === 'learn'
+                      ? 'Learn complete'
+                      : completedLevel === 'practice'
+                        ? 'Practice complete'
+                        : 'Master complete',
+                  )}`
+                : completedBeat
+                  ? `${beat ? beatTitle(beat, state.uiLanguage) : 'Beat'} · ${uiText(state.uiLanguage, 'Complete')}`
+                  : result.feedback === 'partial'
+                    ? uiText(state.uiLanguage, 'Partial success')
+                    : `+${result.appliedProgress} ${uiText(state.uiLanguage, 'Path progress')}`) +
           (result.pathCompleted ? '' : ` · ${nextAction.label}: ${nextAction.detail}`),
         amount: result.appliedProgress,
         diminishingLevel: result.diminishingLevel,
@@ -1247,6 +1334,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       startPath,
       focusPath,
       selectPathNode,
+      setReadingSession,
       createPath,
       setUiLanguage,
       setTranslationId,
@@ -1288,6 +1376,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       startPath,
       focusPath,
       selectPathNode,
+      setReadingSession,
       createPath,
       setUiLanguage,
       setTranslationId,

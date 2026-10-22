@@ -39,7 +39,9 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "@types/react-test-renderer": "^19.3.0",
     "prettier": "^3.6.2",
+    "react-test-renderer": "^19.2.3",
     "typescript": "~6.0.3",
     "vitest": "^4.0.18"
   }

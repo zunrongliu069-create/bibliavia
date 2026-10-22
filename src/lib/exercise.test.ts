@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { initialMastery } from './scheduler';
 import {
   adaptiveSequence,
+  createLessonPlan,
   exactSentenceChoice,
   finishSentenceChoice,
-  lessonModes,
+  mustRetryLessonStep,
   nextVerseChoice,
   recommendedMode,
   verseMatchPairs,
@@ -42,10 +43,29 @@ describe('adaptive exercises', () => {
     expect(exercise.prompt).toContain('____');
     expect(exercise.options).toContain(exercise.correct);
   });
-  it('includes optional listening and speaking exercises', () => {
+  it('teaches phrase order before Build and separates the three stages', () => {
+    const plan = createLessonPlan(3);
+    const learn = plan.filter((step) => step.stage === 0);
     expect(adaptiveSequence).toContain('listen');
-    expect(lessonModes).toHaveLength(10);
-    expect(lessonModes).toEqual(expect.arrayContaining(['listen', 'speak']));
+    expect(plan[0]).toMatchObject({ mode: 'read', scope: 'full', stage: 0 });
+    expect(plan[1]).toMatchObject({ mode: 'read', scope: 'structure', stage: 0 });
+    expect(learn.slice(2)).toEqual([
+      { mode: 'blanks', stage: 0, scope: 'chunk', partStart: 1, partEnd: 1 },
+      { mode: 'blanks', stage: 0, scope: 'chunk', partStart: 2, partEnd: 2 },
+      { mode: 'blanks', stage: 0, scope: 'cumulative', partStart: 1, partEnd: 2 },
+      { mode: 'blanks', stage: 0, scope: 'chunk', partStart: 3, partEnd: 3 },
+      { mode: 'blanks', stage: 0, scope: 'cumulative', partStart: 1, partEnd: 3 },
+      { mode: 'initials', stage: 0, scope: 'full', gate: true, minimumAccuracy: 0.55 },
+    ]);
+    expect(learn.at(-1)?.mode).not.toBe('recall');
+    expect(plan.findIndex((step) => step.mode === 'reorder')).toBeGreaterThan(
+      plan.findLastIndex((step) => step.stage === 0),
+    );
+    expect(plan.filter((step) => step.gate).map((step) => step.minimumAccuracy)).toEqual([
+      0.55, 0.75, 0.9,
+    ]);
+    expect(mustRetryLessonStep(plan.find((step) => step.gate)!, 'hard', 0.6)).toBe(false);
+    expect(mustRetryLessonStep(plan.find((step) => step.gate)!, 'again', 0.9)).toBe(true);
     expect(adaptiveSequence).toEqual(
       expect.arrayContaining([
         'finish',
@@ -60,8 +80,13 @@ describe('adaptive exercises', () => {
   it('does not schedule exercises that reveal future verses', () => {
     expect(adaptiveSequence).not.toContain('match');
     expect(adaptiveSequence).not.toContain('contextChoice');
-    expect(lessonModes).not.toContain('match');
-    expect(lessonModes).not.toContain('contextChoice');
+    expect(createLessonPlan(2).map((step) => step.mode)).not.toContain('match');
+    expect(createLessonPlan(2).map((step) => step.mode)).not.toContain('contextChoice');
+  });
+
+  it('keeps a short verse lesson shorter than a long verse lesson', () => {
+    expect(createLessonPlan(1).filter((step) => step.stage === 0)).toHaveLength(3);
+    expect(createLessonPlan(4).filter((step) => step.stage === 0).length).toBeGreaterThan(3);
   });
   it('creates a two-choice sentence ending', () => {
     const exercise = finishSentenceChoice(verse);

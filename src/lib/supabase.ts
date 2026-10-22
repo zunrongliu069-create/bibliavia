@@ -13,8 +13,8 @@ export const supabase = isSupabaseConfigured
         storage: AsyncStorage,
         autoRefreshToken: true,
         persistSession: true,
-        detectSessionInUrl: Platform.OS === 'web',
-        flowType: 'pkce',
+        detectSessionInUrl: false,
+        flowType: 'implicit',
       },
     })
   : null;

@@ -12,7 +12,10 @@ export function pathRewardFor(path: PathDefinition, result: PathProgressResult):
   const completedTargets = (path.beats ?? [])
     .filter((beat) => result.completedBeatIds.includes(beat.id))
     .reduce((sum, beat) => sum + beat.target, 0);
-  const beatXp = Math.min(30, Math.round(completedTargets / 10));
+  const beatXp =
+    path.structure === 'chapter' && completedTargets > 0
+      ? 10
+      : Math.min(30, Math.round(completedTargets / 10));
   const beatGold = Math.min(15, Math.round(completedTargets / 20));
   if (!result.pathCompleted) return { xp: beatXp, gold: beatGold, fragments: 0 };
 

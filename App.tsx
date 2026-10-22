@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   SafeAreaView,
@@ -14,25 +15,31 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { FeedbackOverlay } from './src/components/FeedbackOverlay';
 import { JourneyScreen } from './src/screens/JourneyScreen';
 import { CollectionScreen } from './src/screens/CollectionScreen';
-import { HomeScreen } from './src/screens/HomeScreen';
 import { LibraryScreen } from './src/screens/LibraryScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
+import { RecallScreen } from './src/screens/RecallScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { AppStoreProvider, useAppStore } from './src/store/AppStore';
-import { AuthStoreProvider } from './src/store/AuthStore';
+import { AuthStoreProvider, useAuthStore } from './src/store/AuthStore';
 import { t } from './src/lib/i18n';
 import { uiText } from './src/lib/uiText';
 import { levelForXp, levelRewardFor, xpForLevel } from './src/lib/level';
 import { prioritizedDueVerses, type ReviewMode } from './src/lib/reviewQueue';
 import { recallEligibleVerses } from './src/lib/pathProgress';
 import { pathDefinitions } from './src/data/paths';
+import {
+  initialAppTab,
+  primaryAppTabs,
+  showGlobalHud,
+  type PrimaryAppTab,
+} from './src/lib/appJourney';
 import { colors, shadow } from './src/theme';
 import type { Verse } from './src/types';
 
-type Tab = 'home' | 'campaign' | 'collection' | 'settings';
+type Tab = PrimaryAppTab;
 const icons: Record<Tab, keyof typeof Ionicons.glyphMap> = {
-  home: 'home',
   campaign: 'map',
+  recall: 'refresh',
   collection: 'albums',
   settings: 'settings',
 };
@@ -45,9 +52,10 @@ const calendarDays = (year: number, month: number) => {
 
 function Shell() {
   const store = useAppStore();
+  const auth = useAuthStore();
   const u = (text: string) => uiText(store.uiLanguage, text);
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<Tab>('home');
+  const [tab, setTab] = useState<Tab>(initialAppTab);
   const [pathView, setPathView] = useState<'journey' | 'reader'>('journey');
   const [hudPanel, setHudPanel] = useState<'streak' | 'levels' | 'inventory' | null>(null);
   const [calendarOffset, setCalendarOffset] = useState(0);
@@ -58,28 +66,18 @@ function Shell() {
   const [review, setReview] = useState<{
     verses: Verse[];
     kind: 'lesson' | 'challenge' | 'chapterQuiz' | ReviewMode;
+    onSessionComplete?: (success: boolean) => void;
+    successThreshold?: number;
   } | null>(null);
   const startLesson = (verse: Verse) => setReview({ verses: [verse], kind: 'lesson' });
-  const startReview = (kind: ReviewMode) => {
-    const eligible = recallEligibleVerses(
-      pathDefinitions,
-      store.progress.pathStates,
-      store.availableVerses,
-    );
-    const verses = prioritizedDueVerses(
-      eligible,
-      store.progress.mastery,
-      store.progress.reviews,
-      kind,
-    );
-    if (verses.length) setReview({ verses, kind });
-  };
   const startChallenge = (
     pathVerses?: Verse[],
     kind: 'challenge' | 'chapterQuiz' = 'challenge',
+    onSessionComplete?: (success: boolean) => void,
+    successThreshold?: number,
   ) => {
     if (pathVerses?.length) {
-      setReview({ verses: pathVerses, kind });
+      setReview({ verses: pathVerses, kind, onSessionComplete, successThreshold });
       return;
     }
     const due = prioritizedDueVerses(
@@ -98,14 +96,30 @@ function Shell() {
         reviewVerses={review.verses}
         kind={review.kind}
         onClose={() => setReview(null)}
+        onSessionComplete={review.onSessionComplete}
+        successThreshold={review.successThreshold}
       />
     );
   const labels: Record<Tab, string> = {
-    home: t(store.uiLanguage, 'home'),
     campaign: t(store.uiLanguage, 'campaign'),
-    collection: t(store.uiLanguage, 'collection'),
+    recall: u('Recall'),
+    collection: u('Collection'),
     settings: t(store.uiLanguage, 'settings'),
   };
+  const recallVerses = useMemo(() => {
+    const eligible = recallEligibleVerses(
+      [...pathDefinitions, ...(store.progress.customPaths ?? [])],
+      store.progress.pathStates,
+      store.availableVerses,
+    );
+    return prioritizedDueVerses(eligible, store.progress.mastery, store.progress.reviews, 'full');
+  }, [
+    store.availableVerses,
+    store.progress.customPaths,
+    store.progress.mastery,
+    store.progress.pathStates,
+    store.progress.reviews,
+  ]);
   const currentLevel = levelForXp(store.progress.xp);
   const calendarDate = new Date();
   calendarDate.setMonth(calendarDate.getMonth() + calendarOffset);
@@ -120,19 +134,7 @@ function Shell() {
     year: 'numeric',
   });
   const screen =
-    tab === 'home' ? (
-      <HomeScreen
-        onStart={startLesson}
-        onReview={startReview}
-        onOpenCollection={() => setTab('collection')}
-        onOpenVerses={() => {
-          setLibraryPassage(null);
-          setPathView('reader');
-          setTab('campaign');
-        }}
-        onOpenPaths={() => setTab('campaign')}
-      />
-    ) : tab === 'campaign' && pathView === 'journey' ? (
+    tab === 'campaign' && pathView === 'journey' ? (
       <JourneyScreen
         onBrowseBible={() => {
           setLibraryPassage(null);
@@ -145,15 +147,23 @@ function Shell() {
         }}
         onMemorize={startLesson}
         onChallenge={startChallenge}
+        recallVerses={recallVerses}
+        onRecall={(verses) => setReview({ verses, kind: 'full' })}
       />
     ) : tab === 'campaign' ? (
       <LibraryScreen
         onStart={startLesson}
+        onContinueReading={(verses) => startChallenge(verses, 'chapterQuiz')}
         initialPassage={libraryPassage}
         onBack={() => {
           setLibraryPassage(null);
           setPathView('journey');
         }}
+      />
+    ) : tab === 'recall' ? (
+      <RecallScreen
+        verses={recallVerses}
+        onStart={() => recallVerses[0] && setReview({ verses: recallVerses, kind: 'full' })}
       />
     ) : tab === 'collection' ? (
       <CollectionScreen />
@@ -163,29 +173,31 @@ function Shell() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.app}>
-        <View style={styles.globalHud}>
-          <HudItem
-            icon="star"
-            value={store.progress.xp}
-            label={`${t(store.uiLanguage, 'xp')} · ${t(store.uiLanguage, 'level')} ${currentLevel}`}
-            color="#F3CB61"
-            onPress={() => setHudPanel('levels')}
-          />
-          <HudItem
-            icon="flame"
-            value={store.progress.streak}
-            label={`${t(store.uiLanguage, 'currentStreak')} · ${activeDates.size} ${u('total days')}`}
-            color="#FF9B32"
-            onPress={() => setHudPanel('streak')}
-          />
-          <HudItem
-            icon="cash"
-            value={store.progress.gold}
-            label={t(store.uiLanguage, 'gold')}
-            color="#F3CB61"
-            onPress={() => setHudPanel('inventory')}
-          />
-        </View>
+        {showGlobalHud(tab, pathView) && (
+          <View style={styles.globalHud}>
+            <HudItem
+              icon="star"
+              value={store.progress.xp}
+              label={`${t(store.uiLanguage, 'xp')} · ${t(store.uiLanguage, 'level')} ${currentLevel}`}
+              color="#F3CB61"
+              onPress={() => setHudPanel('levels')}
+            />
+            <HudItem
+              icon="flame"
+              value={store.progress.streak}
+              label={`${t(store.uiLanguage, 'currentStreak')} · ${activeDates.size} ${u('total days')}`}
+              color="#FF9B32"
+              onPress={() => setHudPanel('streak')}
+            />
+            <HudItem
+              icon="cash"
+              value={store.progress.gold}
+              label={t(store.uiLanguage, 'gold')}
+              color="#F3CB61"
+              onPress={() => setHudPanel('inventory')}
+            />
+          </View>
+        )}
         {hudPanel && (
           <View style={styles.hudOverlay}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setHudPanel(null)} />
@@ -334,9 +346,32 @@ function Shell() {
             </View>
           </View>
         )}
+        {auth.callbackNotice && (
+          <View
+            accessibilityLiveRegion="polite"
+            style={[
+              styles.authNotice,
+              auth.callbackNotice.type === 'error' && styles.authNoticeError,
+            ]}
+          >
+            <Ionicons
+              name={auth.callbackNotice.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
+              size={18}
+              color={auth.callbackNotice.type === 'success' ? '#225C47' : '#8F2F38'}
+            />
+            <Text style={styles.authNoticeText}>{u(auth.callbackNotice.message)}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={u('Close')}
+              onPress={auth.clearCallbackNotice}
+            >
+              <Ionicons name="close" size={20} color="#2F2940" />
+            </Pressable>
+          </View>
+        )}
         <View style={styles.content}>{screen}</View>
         <View style={[styles.nav, styles.gameNav, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-          {(Object.keys(icons) as Tab[]).map((item) => (
+          {primaryAppTabs.map((item) => (
             <Pressable
               key={item}
               style={({ pressed }) => [
@@ -353,17 +388,28 @@ function Shell() {
               }}
               accessibilityRole="tab"
               accessibilityState={{ selected: tab === item }}
-              accessibilityLabel={labels[item]}
+              accessibilityLabel={
+                item === 'recall' && recallVerses.length
+                  ? `${labels[item]} · ${recallVerses.length}`
+                  : labels[item]
+              }
             >
-              <Ionicons
-                name={
-                  tab === item
-                    ? icons[item]
-                    : (`${icons[item]}-outline` as keyof typeof Ionicons.glyphMap)
-                }
-                size={23}
-                color={tab === item ? '#F3CB61' : '#AAA4BC'}
-              />
+              <View style={styles.navIconWrap}>
+                <Ionicons
+                  name={
+                    tab === item
+                      ? icons[item]
+                      : (`${icons[item]}-outline` as keyof typeof Ionicons.glyphMap)
+                  }
+                  size={23}
+                  color={tab === item ? '#F3CB61' : '#AAA4BC'}
+                />
+                {item === 'recall' && recallVerses.length > 0 && (
+                  <View style={styles.navBadge}>
+                    <Text style={styles.navBadgeText}>{Math.min(99, recallVerses.length)}</Text>
+                  </View>
+                )}
+              </View>
               <Text
                 style={[
                   styles.navText,
@@ -381,6 +427,22 @@ function Shell() {
     </SafeAreaView>
   );
 }
+
+function AppGate() {
+  const auth = useAuthStore();
+  const store = useAppStore();
+
+  if (!auth.ready || !store.hydrated) {
+    return (
+      <SafeAreaView style={[styles.safe, styles.startup]}>
+        <ActivityIndicator color={colors.primary} />
+      </SafeAreaView>
+    );
+  }
+
+  return <Shell />;
+}
+
 function HudItem({
   icon,
   value,
@@ -418,7 +480,7 @@ export default function App() {
       <AuthStoreProvider>
         <AppStoreProvider>
           <StatusBar style="dark" />
-          <Shell />
+          <AppGate />
         </AppStoreProvider>
       </AuthStoreProvider>
     </SafeAreaProvider>
@@ -426,6 +488,7 @@ export default function App() {
 }
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.paper },
+  startup: { alignItems: 'center', justifyContent: 'center' },
   app: {
     flex: 1,
     backgroundColor: colors.paper,
@@ -447,6 +510,18 @@ const styles = StyleSheet.create({
     borderBottomColor: '#7B4BBB',
     zIndex: 20,
   },
+  authNotice: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    backgroundColor: '#E5F2EA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#87B49A',
+  },
+  authNoticeError: { backgroundColor: '#FBE9E8', borderBottomColor: '#DCA0A0' },
+  authNoticeText: { flex: 1, color: '#2F2940', fontSize: 12, fontWeight: '700' },
   hudItem: {
     flex: 1,
     minWidth: 0,
@@ -596,6 +671,22 @@ const styles = StyleSheet.create({
     marginHorizontal: 3,
   },
   navItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, minHeight: 50 },
+  navIconWrap: { position: 'relative' },
+  navBadge: {
+    position: 'absolute',
+    top: -7,
+    right: -11,
+    minWidth: 17,
+    height: 17,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: '#17132E',
+    backgroundColor: '#D84A45',
+  },
+  navBadgeText: { color: colors.white, fontSize: 8, fontWeight: '900' },
   navPressed: { opacity: 0.75 },
   navText: { fontSize: 10, fontWeight: '700', color: colors.muted },
   navActive: { color: colors.primary },

@@ -1,18 +1,24 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { makeRedirectUri } from 'expo-auth-session';
 import type { Session } from '@supabase/supabase-js';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Linking } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import { playerIdFor } from '../lib/bibliaviaId';
+import { completeAuthCallback, resolveAuthRedirectUrl } from '../lib/authCallback';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 
 const GUEST_ID_KEY = 'bibliavia/guest-id/v1';
 const ACCOUNTS_KEY = 'bibliavia/accounts/v1';
 const newGuestId = () => `guest-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+const authRedirectUri = () =>
+  resolveAuthRedirectUrl({
+    development: typeof __DEV__ !== 'undefined' && __DEV__,
+    developmentOrigin: process.env.EXPO_PUBLIC_AUTH_DEVELOPMENT_ORIGIN,
+  });
 
 type SyncStatus = 'local' | 'synced' | 'syncing' | 'offline';
 type AuthResult = Promise<string | null>;
 export type EmailCodeMode = 'connect' | 'login';
+export type AuthCallbackNotice = { type: 'success' | 'error'; message: string };
 
 interface StoredAccount {
   userId: string;
@@ -36,8 +42,9 @@ interface AuthStoreValue {
   guest: boolean;
   syncStatus: SyncStatus;
   savedAccounts: SavedAccount[];
-  requestEmailCode: (email: string, mode: EmailCodeMode) => AuthResult;
-  verifyEmailCode: (email: string, code: string, mode: EmailCodeMode) => AuthResult;
+  callbackNotice: AuthCallbackNotice | null;
+  clearCallbackNotice: () => void;
+  requestEmailLink: (email: string, mode: EmailCodeMode) => AuthResult;
   switchAccount: (userId: string) => AuthResult;
   forgetAccount: (userId: string) => Promise<void>;
   signOut: () => AuthResult;
@@ -61,6 +68,7 @@ export function AuthStoreProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [guestId, setGuestId] = useState<string | null>(null);
   const [storedAccounts, setStoredAccounts] = useState<StoredAccount[]>([]);
+  const [callbackNotice, setCallbackNotice] = useState<AuthCallbackNotice | null>(null);
 
   const rememberSession = useCallback(async (next: Session | null) => {
     if (!next?.user.email || next.user.is_anonymous) return;
@@ -78,18 +86,58 @@ export function AuthStoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    if (!supabase) {
+      void (async () => {
+        const savedGuest = await AsyncStorage.getItem(GUEST_ID_KEY);
+        const id = savedGuest ?? newGuestId();
+        if (!savedGuest) await AsyncStorage.setItem(GUEST_ID_KEY, id);
+        if (active) {
+          setGuestId(id);
+          setStoredAccounts(await readAccounts());
+          setReady(true);
+        }
+      })();
+      return () => {
+        active = false;
+      };
+    }
+
+    const client = supabase;
+    const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
+      if (!active) return;
+      setSession(nextSession);
+      void rememberSession(nextSession);
+    });
+    const replaceCallbackUrl = (url: string) => {
+      if (Platform.OS === 'web' && typeof globalThis.history?.replaceState === 'function') {
+        globalThis.history.replaceState({}, '', url);
+      }
+    };
+    const handleAuthUrl = async (url: string | null): Promise<Session | null> => {
+      const result = await completeAuthCallback(client.auth, url, replaceCallbackUrl);
+      if (result.kind === 'none') return null;
+      if (result.kind === 'error') {
+        setCallbackNotice({ type: 'error', message: result.message });
+        return null;
+      }
+      setCallbackNotice({ type: 'success', message: 'Signed in successfully.' });
+      await rememberSession(result.session);
+      return result.session;
+    };
     const initialize = async () => {
       const savedGuest = await AsyncStorage.getItem(GUEST_ID_KEY);
       const id = savedGuest ?? newGuestId();
       if (!savedGuest) await AsyncStorage.setItem(GUEST_ID_KEY, id);
       const accounts = await readAccounts();
-      let nextSession: Session | null = null;
-      if (supabase) {
-        nextSession = (await supabase.auth.getSession()).data.session;
-        if (!nextSession) {
-          const anonymous = await supabase.auth.signInAnonymously();
-          nextSession = anonymous.data.session;
-        }
+      const initialUrl =
+        Platform.OS === 'web' && typeof globalThis.location?.href === 'string'
+          ? globalThis.location.href
+          : await Linking.getInitialURL();
+      let nextSession = await handleAuthUrl(initialUrl);
+      if (!nextSession) nextSession = (await client.auth.getSession()).data.session;
+      if (!nextSession) {
+        const anonymous = await client.auth.signInAnonymously();
+        nextSession = anonymous.data.session;
       }
       if (!active) return;
       setGuestId(id);
@@ -99,21 +147,7 @@ export function AuthStoreProvider({ children }: { children: React.ReactNode }) {
       setReady(true);
     };
     void initialize();
-    if (!supabase)
-      return () => {
-        active = false;
-      };
-    const client = supabase;
-    const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      void rememberSession(nextSession);
-    });
-    const openLink = async (url: string | null) => {
-      const code = url ? new URL(url).searchParams.get('code') : null;
-      if (code) await client.auth.exchangeCodeForSession(code);
-    };
-    void Linking.getInitialURL().then(openLink);
-    const linkSubscription = Linking.addEventListener('url', ({ url }) => void openLink(url));
+    const linkSubscription = Linking.addEventListener('url', ({ url }) => void handleAuthUrl(url));
     return () => {
       active = false;
       data.subscription.unsubscribe();
@@ -121,40 +155,27 @@ export function AuthStoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, [rememberSession]);
 
-  const requestEmailCode = useCallback(
+  const requestEmailLink = useCallback(
     async (email: string, mode: EmailCodeMode) => {
       if (!supabase) return 'Cloud accounts are not configured yet.';
       const cleanEmail = email.trim().toLowerCase();
+      setCallbackNotice(null);
       const result =
         mode === 'connect' && session?.user.is_anonymous
-          ? await supabase.auth.updateUser({ email: cleanEmail })
+          ? await supabase.auth.updateUser(
+              { email: cleanEmail },
+              { emailRedirectTo: authRedirectUri() },
+            )
           : await supabase.auth.signInWithOtp({
               email: cleanEmail,
               options: {
-                emailRedirectTo: makeRedirectUri({ scheme: 'scriptora' }),
+                emailRedirectTo: authRedirectUri(),
                 shouldCreateUser: mode === 'connect',
               },
             });
       return result.error?.message ?? null;
     },
     [session],
-  );
-
-  const verifyEmailCode = useCallback(
-    async (email: string, code: string, mode: EmailCodeMode) => {
-      if (!supabase) return 'Cloud accounts are not configured yet.';
-      const cleanCode = code.replace(/\D/g, '').slice(0, 6);
-      if (cleanCode.length !== 6) return 'Enter the 6-digit verification code.';
-      const { data, error } = await supabase.auth.verifyOtp({
-        email: email.trim().toLowerCase(),
-        token: cleanCode,
-        type: mode === 'connect' ? 'email_change' : 'email',
-      });
-      if (error) return error.message;
-      await rememberSession(data.session);
-      return null;
-    },
-    [rememberSession],
   );
 
   const switchAccount = useCallback(
@@ -217,13 +238,14 @@ export function AuthStoreProvider({ children }: { children: React.ReactNode }) {
       playerId: userId ? playerIdFor(userId) : null,
       guest,
       syncStatus: session ? 'synced' : 'local',
+      callbackNotice,
+      clearCallbackNotice: () => setCallbackNotice(null),
       savedAccounts: storedAccounts.map((account) => ({
         userId: account.userId,
         email: account.email,
         playerId: playerIdFor(account.userId),
       })),
-      requestEmailCode,
-      verifyEmailCode,
+      requestEmailLink,
       switchAccount,
       forgetAccount,
       signOut,
@@ -234,9 +256,9 @@ export function AuthStoreProvider({ children }: { children: React.ReactNode }) {
       session,
       userId,
       guest,
+      callbackNotice,
       storedAccounts,
-      requestEmailCode,
-      verifyEmailCode,
+      requestEmailLink,
       switchAccount,
       forgetAccount,
       signOut,

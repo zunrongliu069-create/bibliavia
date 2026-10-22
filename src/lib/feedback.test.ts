@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FeedbackEvent, FeedbackSettings } from '../types';
-import { feedbackPresentation } from './feedback';
+import { feedbackPresentation, progressFeedbackTier } from './feedback';
 
 const settings: FeedbackSettings = {
   soundEffects: true,
@@ -48,5 +48,14 @@ describe('feedback presentation', () => {
     const triumphant = feedbackPresentation({ ...event, tone: 'triumphant' }, settings);
     expect(solemn.playbackRate).toBeLessThan(triumphant.playbackRate);
     expect(solemn.frequencies).not.toEqual(triumphant.frequencies);
+  });
+
+  it('keeps completion feedback below major milestones', () => {
+    expect(progressFeedbackTier({ verseLevel: 'learn' })).toBe(2);
+    expect(progressFeedbackTier({ verseLevel: 'practice' })).toBe(2);
+    expect(progressFeedbackTier({ verseLevel: 'master' })).toBe(3);
+    expect(progressFeedbackTier({ completedChapter: true })).toBe(3);
+    expect(progressFeedbackTier({ pathCompleted: true })).toBe(4);
+    expect(progressFeedbackTier({})).toBe(1);
   });
 });

@@ -76,6 +76,31 @@ export function Button({
   );
 }
 
+export function BottomNavigation({
+  backLabel,
+  continueLabel,
+  onBack,
+  onContinue,
+  continueDisabled = false,
+}: {
+  backLabel: string;
+  continueLabel: string;
+  onBack: () => void;
+  onContinue: () => void;
+  continueDisabled?: boolean;
+}) {
+  return (
+    <View style={styles.bottomNavigation}>
+      <View style={styles.bottomNavigationAction}>
+        <Button label={backLabel} variant="secondary" onPress={onBack} />
+      </View>
+      <View style={styles.bottomNavigationAction}>
+        <Button label={continueLabel} disabled={continueDisabled} onPress={onContinue} />
+      </View>
+    </View>
+  );
+}
+
 export function Eyebrow({ children }: { children: React.ReactNode }) {
   return <Text style={styles.eyebrow}>{children}</Text>;
 }
@@ -119,4 +144,6 @@ const styles = StyleSheet.create({
   primaryText: { color: colors.white },
   dangerText: { color: '#A83B2F' },
   eyebrow: { fontSize: 12, fontWeight: '900', color: '#8A641F', letterSpacing: 1.15 },
+  bottomNavigation: { flexDirection: 'row', gap: 12, marginTop: 10 },
+  bottomNavigationAction: { flex: 1 },
 });

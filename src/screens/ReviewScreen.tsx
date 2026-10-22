@@ -20,9 +20,14 @@ import { characterById } from '../data/characters';
 import { chestImageForTier } from '../data/chests';
 import { pathById, pathForBook } from '../data/paths';
 import {
+  createLessonPlan,
   exactSentenceChoice,
   finishSentenceChoice,
-  lessonModes,
+  isLessonPlanStageEnd,
+  lessonLevelForPlanEnd,
+  lessonStageForPlanExercise,
+  lessonStageStart,
+  mustRetryLessonStep,
   nextVerseChoice,
   recommendedMode,
   understandingChoices,
@@ -39,12 +44,14 @@ import { lessonOutcome } from '../lib/lessonOutcome';
 import { chestTierAfterTap, lessonChestTierForStage } from '../lib/rewards';
 import {
   blankExercise,
-  lessonSectionForExercise,
+  initials,
+  lessonSectionForParts,
   normalizeRecall,
   recallAccuracy,
   reorderedWords,
   shortRecallExercise,
   tokenize,
+  verseLearningChunks,
 } from '../lib/tokenize';
 import { colors, radius } from '../theme';
 import type {
@@ -77,26 +84,52 @@ type SpeechRecognitionLike = {
 const lessonXp = [4, 5, 11, 3, 3, 5, 4, 3, 5, 7];
 const stageTotals = [20, 35, 50];
 const lessonWorld = require('../../assets/game/scriptora-path-world.png');
-const stageForExercise = (index: number) => (index < 3 ? 0 : index < 7 ? 1 : 2);
 
 export function ReviewScreen({
   initialVerse,
   reviewVerses = [initialVerse],
   kind,
   onClose,
+  onSessionComplete,
+  successThreshold = 0.55,
 }: {
   initialVerse: Verse;
   reviewVerses?: Verse[];
   kind: SessionKind;
   onClose: () => void;
+  onSessionComplete?: (success: boolean) => void;
+  successThreshold?: number;
 }) {
   const store = useAppStore();
   const isChallenge = kind === 'challenge' || kind === 'chapterQuiz';
   const u = (text: string) => uiText(store.uiLanguage, text);
   const [lessonVerse, setLessonVerse] = useState(initialVerse);
   const lessonId = lessonVerse.id;
+  const lessonChunks = useMemo(
+    () => verseLearningChunks(lessonVerse.text, lessonVerse.languageTag),
+    [lessonVerse.languageTag, lessonVerse.text],
+  );
+  const lessonPlan = useMemo(() => createLessonPlan(lessonChunks.length), [lessonChunks.length]);
+  const focusedLessonPath = store.progress.focusedPathId
+    ? pathById(store.progress.focusedPathId)
+    : undefined;
+  const lessonBeatId = `${initialVerse.bookId}-${initialVerse.chapter}-${initialVerse.verseStart}`;
+  const lessonNode = focusedLessonPath
+    ? store.progress.pathStates?.[focusedLessonPath.id]?.nodeProgress?.[lessonBeatId]
+    : undefined;
+  const savedResume = store.progress.lessonProgress[lessonId] ?? 0;
+  const practiceStart = lessonStageStart(lessonPlan, 1);
+  const masterStart = lessonStageStart(lessonPlan, 2);
   const resumeIndex =
-    kind === 'lesson' ? Math.max(0, Math.min(9, store.progress.lessonProgress[lessonId] ?? 0)) : 0;
+    kind !== 'lesson'
+      ? 0
+      : lessonNode?.levels?.master
+        ? masterStart
+        : lessonNode?.levels?.practice
+          ? masterStart
+          : lessonNode?.levels?.learn
+            ? Math.max(practiceStart, Math.min(masterStart - 1, savedResume))
+            : Math.max(0, Math.min(practiceStart - 1, savedResume));
   const [phase, setPhase] = useState<'intro' | 'practice' | 'checkpoint' | 'reward'>('intro');
   const [pendingChestTier, setPendingChestTier] = useState(1);
   const [sessionScores, setSessionScores] = useState<number[]>([]);
@@ -121,11 +154,11 @@ export function ReviewScreen({
           reviewSequence.findIndex((item) => item.id === verse.id),
         )
       : exerciseIndex;
-  const sessionCount = kind === 'lesson' ? 10 : reviewSequence.length;
+  const sessionCount = kind === 'lesson' ? lessonPlan.length : reviewSequence.length;
   const mastery = store.progress.mastery[verse.id];
   const [mode, setMode] = useState<ExerciseMode>(() =>
     kind === 'lesson'
-      ? lessonModes[resumeIndex]!
+      ? lessonPlan[resumeIndex]!.mode
       : isChallenge
         ? 'recall'
         : recommendedMode(store.progress.mastery[initialVerse.id]),
@@ -151,14 +184,27 @@ export function ReviewScreen({
   const advancingRef = useRef(false);
   const startedAt = useRef(Date.now());
   const sessionId = useRef(`${kind}-${lessonId}-${Date.now()}`);
+  const lessonStep = lessonPlan[Math.min(exerciseIndex, lessonPlan.length - 1)]!;
   const lessonSection = useMemo(
     () =>
-      lessonSectionForExercise(
+      lessonSectionForParts(
         verse.text,
         verse.languageTag,
-        kind === 'lesson' ? exerciseIndex : 9,
+        kind === 'lesson' && lessonStep.scope !== 'full' && lessonStep.scope !== 'structure'
+          ? lessonStep.partStart
+          : undefined,
+        kind === 'lesson' && lessonStep.scope !== 'full' && lessonStep.scope !== 'structure'
+          ? lessonStep.partEnd
+          : undefined,
       ),
-    [exerciseIndex, kind, verse.languageTag, verse.text],
+    [
+      kind,
+      lessonStep.partEnd,
+      lessonStep.partStart,
+      lessonStep.scope,
+      verse.languageTag,
+      verse.text,
+    ],
   );
   const exerciseVerse = useMemo(
     () => ({ ...verse, text: lessonSection.text }),
@@ -206,7 +252,7 @@ export function ReviewScreen({
   );
   const matchRightOptions = useMemo(() => [...matchPairs].reverse(), [matchPairs]);
   const recommended = recommendedMode(mastery);
-  const stageIndex = stageForExercise(exerciseIndex);
+  const stageIndex = lessonStageForPlanExercise(lessonPlan, exerciseIndex);
   const stageLabel = [
     t(store.uiLanguage, 'stageLearn'),
     t(store.uiLanguage, 'stagePractice'),
@@ -218,7 +264,7 @@ export function ReviewScreen({
       : mode === 'moreBlanks'
         ? strongGaps.answer
         : mode === 'initials'
-          ? initialPhrase.phrase
+          ? lessonSection.text
           : mode === 'keywords'
             ? keywordPhrase.phrase
             : mode === 'context'
@@ -260,13 +306,18 @@ export function ReviewScreen({
   };
 
   const prompt = useMemo(() => {
-    if (mode === 'read') return lessonSection.text;
+    if (mode === 'read')
+      return kind === 'lesson' && lessonStep.scope === 'structure'
+        ? lessonChunks
+            .map((chunk, index) => `${String.fromCharCode(65 + index)} · ${chunk}`)
+            .join('\n\n')
+        : lessonSection.text;
     if (mode === 'blanks')
       return `${lightGaps.prompt}\n\n${t(store.uiLanguage, 'missingWordsOnly')}`;
     if (mode === 'moreBlanks')
       return `${strongGaps.prompt}\n\n${t(store.uiLanguage, 'missingWordsOnly')}`;
     if (mode === 'initials')
-      return `${initialPhrase.initials}\n\n${t(store.uiLanguage, 'shortPhrasePrompt')}`;
+      return `${initials(lessonSection.text, verse.languageTag)}\n\n${t(store.uiLanguage, 'shortPhrasePrompt')}`;
     if (mode === 'keywords')
       return `${keywordPhrase.keywords}\n\n${t(store.uiLanguage, 'shortPhrasePrompt')}`;
     if (mode === 'choice') return choice.prompt;
@@ -297,6 +348,9 @@ export function ReviewScreen({
     strongGaps,
     initialPhrase,
     keywordPhrase,
+    kind,
+    lessonChunks,
+    lessonStep.scope,
     lessonSection.text,
     store.uiLanguage,
   ]);
@@ -476,7 +530,11 @@ export function ReviewScreen({
     if (advancingRef.current) return;
     advancingRef.current = true;
     const score = mode === 'read' || mode === 'listen' ? 1 : accuracy;
-    const { success } = lessonOutcome(gradeValue, score);
+    const baseOutcome = lessonOutcome(gradeValue, score);
+    const success =
+      kind === 'lesson' && lessonStep.gate
+        ? !mustRetryLessonStep(lessonStep, gradeValue, score)
+        : baseOutcome.success;
     const now = new Date();
     const alreadyReceivedFailureProgress = store.progress.reviews.some(
       (review) =>
@@ -530,7 +588,9 @@ export function ReviewScreen({
       if (kind !== 'lesson') {
         const nextVerse = reviewSequence[currentIndex + 1];
         if (!nextVerse) {
-          recordSessionPath(nextScores);
+          const average = nextScores.reduce((sum, item) => sum + item, 0) / nextScores.length;
+          if (onSessionComplete) onSessionComplete(average >= successThreshold);
+          else recordSessionPath(nextScores);
           openCurrentChest(1);
           return;
         }
@@ -540,19 +600,20 @@ export function ReviewScreen({
         );
         return;
       }
+      if (kind === 'lesson' && mustRetryLessonStep(lessonStep, gradeValue, score)) {
+        resetAttempt(mode);
+        return;
+      }
       const nextIndex = exerciseIndex + 1;
-      if (nextIndex >= lessonModes.length) store.completeLesson(lessonId);
+      if (nextIndex >= lessonPlan.length) store.completeLesson(lessonId);
       else store.setLessonProgress(lessonId, nextIndex);
       setExerciseIndex(nextIndex);
-      if (nextIndex === 3 || nextIndex === 7 || nextIndex === lessonModes.length) {
-        recordSessionPath(
-          nextScores,
-          nextIndex === 3 ? 'learn' : nextIndex === 7 ? 'practice' : 'master',
-        );
+      if (isLessonPlanStageEnd(lessonPlan, nextIndex)) {
+        recordSessionPath(nextScores, lessonLevelForPlanEnd(lessonPlan, nextIndex));
         setPhase('checkpoint');
         return;
       }
-      resetAttempt(lessonModes[nextIndex]!);
+      resetAttempt(lessonPlan[nextIndex]!.mode);
     }, 1100);
   };
 
@@ -571,18 +632,15 @@ export function ReviewScreen({
       return;
     }
     const nextIndex = exerciseIndex + 1;
-    if (nextIndex >= lessonModes.length) store.completeLesson(lessonId);
+    if (nextIndex >= lessonPlan.length) store.completeLesson(lessonId);
     else store.setLessonProgress(lessonId, nextIndex);
     setExerciseIndex(nextIndex);
-    if (nextIndex === 3 || nextIndex === 7 || nextIndex === lessonModes.length) {
-      recordSessionPath(
-        sessionScores,
-        nextIndex === 3 ? 'learn' : nextIndex === 7 ? 'practice' : 'master',
-      );
+    if (isLessonPlanStageEnd(lessonPlan, nextIndex)) {
+      recordSessionPath(sessionScores, lessonLevelForPlanEnd(lessonPlan, nextIndex));
       setPhase('checkpoint');
       return;
     }
-    resetAttempt(lessonModes[nextIndex]!);
+    resetAttempt(lessonPlan[nextIndex]!.mode);
   };
 
   const playVerse = () => {
@@ -634,12 +692,13 @@ export function ReviewScreen({
         language={store.uiLanguage}
         kind={kind === 'lesson' ? 'lesson' : 'quick'}
         resumeIndex={resumeIndex}
+        resumeStage={lessonStageForPlanExercise(lessonPlan, resumeIndex)}
         onStart={() => setPhase('practice')}
         onClose={onClose}
       />
     );
   if (phase === 'checkpoint') {
-    const completedStage = stageForExercise(Math.max(0, exerciseIndex - 1));
+    const completedStage = lessonStageForPlanExercise(lessonPlan, Math.max(0, exerciseIndex - 1));
     const checkpointChestTier = lessonChestTierForStage(completedStage);
     return (
       <StageCheckpoint
@@ -650,11 +709,11 @@ export function ReviewScreen({
         onFinish={() => (checkpointChestTier ? openCurrentChest(checkpointChestTier) : onClose())}
         onContinue={() => {
           setHearts((old) => Math.min(3, old + 1));
-          if (exerciseIndex >= 10) {
+          if (exerciseIndex >= lessonPlan.length) {
             openCurrentChest(lessonChestTierForStage(2)!);
             return;
           }
-          resetAttempt(lessonModes[exerciseIndex]!);
+          resetAttempt(lessonPlan[exerciseIndex]!.mode);
           setPhase('practice');
         }}
       />
@@ -956,7 +1015,7 @@ export function ReviewScreen({
                     onPress={skipOptionalExercise}
                   />
                 )}
-                {mode !== 'read' && !(kind === 'lesson' && exerciseIndex >= 7) && (
+                {mode !== 'read' && !(kind === 'lesson' && stageIndex === 2) && (
                   <Button
                     label={t(store.uiLanguage, 'showHint')}
                     variant="secondary"
@@ -1172,6 +1231,7 @@ function LessonIntro({
   language,
   kind,
   resumeIndex,
+  resumeStage,
   onStart,
   onClose,
 }: {
@@ -1180,14 +1240,15 @@ function LessonIntro({
   language: UiLanguage;
   kind: 'lesson' | 'quick';
   resumeIndex: number;
+  resumeStage: 0 | 1 | 2;
   onStart: () => void;
   onClose: () => void;
 }) {
-  const resumeStage = [
+  const resumeStageLabel = [
     t(language, 'stageLearn'),
     t(language, 'stagePractice'),
     t(language, 'stageMaster'),
-  ][stageForExercise(resumeIndex)]!;
+  ][resumeStage]!;
   return (
     <AdventureShell>
       <Pressable
@@ -1220,18 +1281,16 @@ function LessonIntro({
         <View style={styles.lessonFact}>
           <Ionicons name="git-branch" size={22} color="#78E2BD" />
           <Text style={styles.lessonFactText}>
-            {kind === 'quick'
-              ? '+25 XP'
-              : `${resumeStage} · ${stageTotals[stageForExercise(resumeIndex)]} XP`}
+            {kind === 'quick' ? '+25 XP' : `${resumeStageLabel} · ${stageTotals[resumeStage]} XP`}
           </Text>
         </View>
       </View>
       {kind === 'lesson' && resumeIndex > 0 && (
         <View style={styles.resume}>
           <Text style={styles.resumeText}>
-            {t(language, 'progressSaved')} {resumeStage}
+            {t(language, 'progressSaved')} {resumeStageLabel}
           </Text>
-          <ProgressBar value={resumeIndex / 10} color={colors.mint} />
+          <ProgressBar value={resumeIndex / Math.max(1, count)} color={colors.mint} />
         </View>
       )}
       <Button label={t(language, 'startLesson')} onPress={onStart} />

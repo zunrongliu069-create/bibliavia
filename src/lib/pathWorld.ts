@@ -116,3 +116,16 @@ export const regionForChapter = (world: PathWorldDefinition, chapter?: number) =
     (region) =>
       chapter !== undefined && chapter >= region.chapters[0] && chapter <= region.chapters[1],
   ) ?? world.regions[0]!;
+
+export const travelerPositionBetween = (
+  current: { x: number; y: number },
+  next: { x: number; y: number } | undefined,
+  progress: number,
+) => {
+  const safeProgress = Math.max(0, Math.min(1, progress)) * 0.85;
+  if (!next) return current;
+  return {
+    x: current.x + (next.x - current.x) * safeProgress,
+    y: current.y + (next.y - current.y) * safeProgress,
+  };
+};

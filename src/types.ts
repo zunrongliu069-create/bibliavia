@@ -29,11 +29,61 @@ export type PathNodeKind = 'content' | 'boss' | 'final-boss';
 export type PathNodeStatus = 'locked' | 'available' | 'current' | 'completed';
 export type VersePathLevel = 'learn' | 'practice' | 'master';
 
+export type LocalizedReadingText = Record<UiLanguage, string>;
+
+export interface ReadingChoiceInteraction {
+  kind: 'choose';
+  prompt: LocalizedReadingText;
+  options: { id: string; label: LocalizedReadingText }[];
+  correctOptionId: string;
+  explanation: LocalizedReadingText;
+}
+
+export interface ReadingOrderInteraction {
+  kind: 'order';
+  prompt: LocalizedReadingText;
+  items: { id: string; label: LocalizedReadingText }[];
+  correctOrder: string[];
+  explanation: LocalizedReadingText;
+}
+
+export interface ReadingConnectInteraction {
+  kind: 'connect';
+  prompt: LocalizedReadingText;
+  pairs: { id: string; left: LocalizedReadingText; right: LocalizedReadingText }[];
+  explanation: LocalizedReadingText;
+}
+
+export type ReadingInteractionDefinition =
+  | ReadingChoiceInteraction
+  | ReadingOrderInteraction
+  | ReadingConnectInteraction;
+
 export interface PathChapterSection {
   id: string;
   title: string;
   titles?: Partial<Record<UiLanguage, string>>;
   passage: BiblePassageReference;
+  interaction?: ReadingInteractionDefinition;
+}
+
+export interface ReadingChapterDefinition {
+  beatId: string;
+  revision: number;
+  estimatedMinutes: number;
+  sections: PathChapterSection[];
+  recap: ReadingInteractionDefinition[];
+}
+
+export type ReadingSessionPhase = 'intro' | 'reading' | 'interaction' | 'recap' | 'complete';
+
+export interface ReadingSessionState {
+  definitionRevision?: number;
+  phase: ReadingSessionPhase;
+  sectionIndex: number;
+  recapIndex: number;
+  completedSectionIds: string[];
+  answerState: 'idle' | 'correct' | 'incorrect';
 }
 
 export interface PathBossContent {
@@ -61,6 +111,7 @@ export interface PathBeatDefinition {
   discovery?: Partial<Record<UiLanguage, string>>;
   nodeKind?: PathNodeKind;
   sections?: PathChapterSection[];
+  reading?: Pick<ReadingChapterDefinition, 'estimatedMinutes' | 'recap'>;
   boss?: PathBossContent;
   regionId?: string;
 }
@@ -111,6 +162,7 @@ export interface PathNodeProgress {
   chapter?: {
     readingCompleted: boolean;
     quizCompleted: boolean;
+    readingSession?: ReadingSessionState;
   };
 }
 export type FeedbackEventType =

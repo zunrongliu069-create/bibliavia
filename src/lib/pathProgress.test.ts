@@ -6,9 +6,11 @@ import {
   completeChapterPathPart,
   completeVersePathLevel,
   createPathState,
+  finalBossChallengeVerses,
   migrateStructuredPathState,
   recallEligibleBeatIds,
   recallEligibleVerses,
+  pathProgressRatio,
   setCurrentPathNode,
 } from './pathProgress';
 
@@ -25,6 +27,16 @@ const path: PathDefinition = {
 };
 
 describe('Path progression', () => {
+  it('samples a practical Final Boss across the complete passage', () => {
+    const verses = Array.from({ length: 433 }, (_, index) => ({
+      id: `v${index + 1}`,
+    })) as import('../types').Verse[];
+    const selected = finalBossChallengeVerses(verses);
+    expect(selected).toHaveLength(12);
+    expect(selected[0]?.id).toBe('v1');
+    expect(selected.at(-1)?.id).toBe('v433');
+    expect(new Set(selected.map((verse) => verse.id))).toHaveLength(12);
+  });
   it('unlocks only the next Verse node after Learn and keeps Recall locked until Master', () => {
     const versePath: PathDefinition = {
       id: 'verse-path',
@@ -76,6 +88,109 @@ describe('Path progression', () => {
     const quizzed = completeChapterPathPart(chapterPath, read, 'c1', 'quiz');
     expect(quizzed.nodeProgress?.c1?.status).toBe('completed');
     expect(quizzed.nodeProgress?.c2?.status).toBe('available');
+  });
+
+  it('shows partial section progress without unlocking the next chapter', () => {
+    const chapterPath: PathDefinition = {
+      id: 'chapter-path',
+      title: 'Chapter Path',
+      source: 'curated',
+      kind: 'reading',
+      structure: 'chapter',
+      beats: [
+        {
+          id: 'c1',
+          title: 'Chapter 1',
+          target: 1,
+          nodeKind: 'content',
+          sections: [
+            {
+              id: 'one',
+              title: 'One',
+              passage: {
+                bookId: 'mark',
+                startChapter: 1,
+                startVerse: 1,
+                endChapter: 1,
+                endVerse: 3,
+              },
+            },
+            {
+              id: 'two',
+              title: 'Two',
+              passage: {
+                bookId: 'mark',
+                startChapter: 1,
+                startVerse: 4,
+                endChapter: 1,
+                endVerse: 8,
+              },
+            },
+          ],
+          reading: { estimatedMinutes: 4, recap: [] },
+        },
+        { id: 'c2', title: 'Chapter 2', target: 1, nodeKind: 'content', parentId: 'c1' },
+      ],
+    };
+    const state = createPathState(chapterPath);
+    state.nodeProgress!.c1!.chapter!.readingSession = {
+      phase: 'reading',
+      sectionIndex: 1,
+      recapIndex: 0,
+      completedSectionIds: ['one'],
+      answerState: 'idle',
+    };
+    expect(pathProgressRatio(chapterPath, state)).toBeCloseTo(0.25);
+    expect(state.nodeProgress?.c2?.status).toBe('locked');
+  });
+
+  it('completes a Verse Path only after its available Final Boss succeeds', () => {
+    const versePath: PathDefinition = {
+      id: 'short-verse-path',
+      title: 'Short Verse Path',
+      source: 'curated',
+      kind: 'memorization',
+      structure: 'verse',
+      beats: [
+        { id: 'v1', title: 'Verse 1', target: 1, nodeKind: 'content' },
+        {
+          id: 'final',
+          title: 'Final Boss',
+          target: 1,
+          parentId: 'v1',
+          nodeKind: 'final-boss',
+          boss: { kind: 'final-boss', coverage: [] },
+        },
+      ],
+    };
+    const learned = completeVersePathLevel(versePath, createPathState(versePath), 'v1', 'learn');
+    const atBoss = setCurrentPathNode(versePath, learned, 'final');
+    const progress = {
+      pathStates: { [versePath.id]: atBoss },
+      activePathIds: [versePath.id],
+    } as unknown as UserProgress;
+    const failed = applyActivityToProgress(progress, versePath, {
+      activity: 'challenge',
+      beatId: 'final',
+      completion: { type: 'boss-challenge' },
+      success: false,
+      at: new Date('2026-09-11T10:00:00Z'),
+    });
+    expect(failed.result.state.status).toBe('active');
+    expect(failed.result.state.activeBeatIds).toEqual(['final']);
+    expect(failed.result.state.nodeProgress?.v1?.status).toBe('completed');
+    expect(failed.result.state.nodeProgress?.v1?.levels?.learn).toBe(true);
+
+    const passed = applyActivityToProgress(failed.progress, versePath, {
+      activity: 'challenge',
+      beatId: 'final',
+      completion: { type: 'boss-challenge' },
+      success: true,
+      at: new Date('2026-09-11T10:05:00Z'),
+    });
+    expect(passed.result.pathCompleted).toBe(true);
+    expect(passed.result.state.status).toBe('completed');
+    expect(passed.result.state.completedBeatIds).toEqual(['final']);
   });
 
   it('applies structured completion without using legacy numeric Beat progress', () => {
@@ -162,6 +277,63 @@ describe('Path progression', () => {
       },
     ] as import('../types').Verse[];
     expect(recallEligibleVerses([versePath], { memory: migrated }, verses)).toEqual([verses[0]]);
+  });
+
+  it('reconciles saved progress with an updated Path definition', () => {
+    const oldPath: PathDefinition = {
+      id: 'reading-mark',
+      title: 'Mark',
+      source: 'curated',
+      kind: 'reading',
+      structure: 'chapter',
+      beats: [
+        { id: 'mark-1', title: 'Mark 1', target: 1, nodeKind: 'content' },
+        {
+          id: 'mark-2',
+          title: 'Mark 2',
+          target: 1,
+          nodeKind: 'content',
+          parentId: 'mark-1',
+        },
+      ],
+    };
+    const updatedPath: PathDefinition = {
+      ...oldPath,
+      beats: [
+        ...oldPath.beats!,
+        {
+          id: 'mark-3',
+          title: 'Mark 3',
+          target: 1,
+          nodeKind: 'content',
+          parentId: 'mark-2',
+        },
+      ],
+    };
+    let saved = createPathState(oldPath);
+    saved = completeChapterPathPart(oldPath, saved, 'mark-1', 'reading');
+    saved = completeChapterPathPart(oldPath, saved, 'mark-1', 'quiz');
+    saved = setCurrentPathNode(oldPath, saved, 'mark-2');
+    saved.nodeProgress!['mark-2']!.chapter!.readingSession = {
+      phase: 'reading',
+      sectionIndex: 1,
+      recapIndex: 0,
+      completedSectionIds: ['mark-2-one'],
+      answerState: 'idle',
+    };
+
+    const reconciled = migrateStructuredPathState(updatedPath, saved, []);
+
+    expect(Object.keys(reconciled.nodeProgress!)).toEqual(['mark-1', 'mark-2', 'mark-3']);
+    expect(reconciled.nodeProgress?.['mark-1']?.chapter).toMatchObject({
+      readingCompleted: true,
+      quizCompleted: true,
+    });
+    expect(reconciled.nodeProgress?.['mark-2']).toMatchObject({
+      status: 'current',
+      chapter: { readingSession: { sectionIndex: 1 } },
+    });
+    expect(reconciled.nodeProgress?.['mark-3']?.status).toBe('locked');
   });
 
   it('keeps diminishing returns separate by activity, Beat, and local day', () => {

@@ -8,6 +8,7 @@ import type {
   Verse,
   VersePathLevel,
 } from '../types';
+import { readingSessionProgress } from './readingFlow';
 
 export interface PathProgressConfig {
   activityPoints: Record<PathActivityType, number>;
@@ -31,6 +32,19 @@ export const DEFAULT_PATH_PROGRESS_CONFIG: PathProgressConfig = {
   challengeMaximumMultiplier: 1.3,
 };
 
+export const FINAL_BOSS_CHALLENGE_VERSE_COUNT = 12;
+
+export function finalBossChallengeVerses(
+  verses: Verse[],
+  maximum = FINAL_BOSS_CHALLENGE_VERSE_COUNT,
+): Verse[] {
+  if (verses.length <= maximum) return verses;
+  return Array.from(
+    { length: maximum },
+    (_, index) => verses[Math.round((index * (verses.length - 1)) / (maximum - 1))],
+  ).filter((verse): verse is Verse => Boolean(verse));
+}
+
 export interface PathActivityInput {
   activity: PathActivityType;
   at: Date;
@@ -39,7 +53,8 @@ export interface PathActivityInput {
   success?: boolean;
   completion?:
     | { type: 'verse-level'; level: VersePathLevel }
-    | { type: 'chapter-part'; part: 'reading' | 'quiz' };
+    | { type: 'chapter-part'; part: 'reading' | 'quiz' }
+    | { type: 'boss-challenge' };
 }
 
 export interface PathProgressResult {
@@ -119,10 +134,37 @@ export function migrateStructuredPathState(
   current: PathState,
   completedLessonIds: string[],
 ): PathState {
-  if (!path.structure || current.nodeProgress) return current;
-  const state = { ...createPathState(path), ...current, nodeProgress: initialNodeProgress(path) };
+  if (!path.structure) return current;
+  const initial = createPathState(path);
+  const currentBeatIds = new Set((path.beats ?? []).map((beat) => beat.id));
+  const state: PathState = {
+    ...initial,
+    ...current,
+    activeBeatIds: current.activeBeatIds.filter((id) => currentBeatIds.has(id)),
+    completedBeatIds: current.completedBeatIds.filter((id) => currentBeatIds.has(id)),
+    beatProgress: Object.fromEntries(
+      (path.beats ?? []).map((beat) => [beat.id, current.beatProgress[beat.id] ?? 0]),
+    ),
+    nodeProgress: Object.fromEntries(
+      (path.beats ?? []).map((beat) => {
+        const base = initial.nodeProgress![beat.id]!;
+        const saved = current.nodeProgress?.[beat.id];
+        return [
+          beat.id,
+          saved
+            ? {
+                ...base,
+                ...saved,
+                levels: saved.levels ? { ...base.levels, ...saved.levels } : base.levels,
+                chapter: saved.chapter ? { ...base.chapter, ...saved.chapter } : base.chapter,
+              }
+            : base,
+        ];
+      }),
+    ),
+  };
   const contentNodes = (path.beats ?? []).filter((beat) => beat.nodeKind === 'content');
-  if (path.structure === 'verse') {
+  if (!current.nodeProgress && path.structure === 'verse') {
     for (const beat of contentNodes) {
       if (!completedLessonIds.some((id) => id === beat.id || id.endsWith(`-${beat.id}`))) continue;
       state.nodeProgress![beat.id] = {
@@ -130,7 +172,7 @@ export function migrateStructuredPathState(
         levels: { learn: true, practice: true, master: true },
       };
     }
-  } else {
+  } else if (!current.nodeProgress) {
     for (const beat of contentNodes) {
       if (!current.completedBeatIds.includes(beat.id)) continue;
       state.nodeProgress![beat.id] = {
@@ -139,10 +181,17 @@ export function migrateStructuredPathState(
       };
     }
   }
+  for (const beat of path.beats ?? []) {
+    const node = state.nodeProgress?.[beat.id];
+    if (!node || node.status !== 'locked' || !beat.parentId) continue;
+    const parent = state.nodeProgress?.[beat.parentId];
+    if (parent?.status === 'completed')
+      state.nodeProgress![beat.id] = { ...node, status: 'available' };
+  }
   const firstIncomplete = contentNodes.find(
     (beat) => state.nodeProgress?.[beat.id]?.status !== 'completed',
   );
-  if (firstIncomplete) {
+  if (!state.activeBeatIds.length && firstIncomplete) {
     state.nodeProgress![firstIncomplete.id] = {
       ...state.nodeProgress![firstIncomplete.id]!,
       status: 'current',
@@ -229,6 +278,27 @@ export function completeChapterPathPart(
   return state;
 }
 
+export function completeBossChallenge(
+  path: PathDefinition,
+  current: PathState,
+  beatId: string,
+  success: boolean,
+  at: Date,
+): PathState {
+  const state = structuredState(path, current);
+  const beat = path.beats?.find((item) => item.id === beatId);
+  const node = state.nodeProgress?.[beatId];
+  if (!beat?.boss || !node || node.status === 'locked')
+    throw new Error(`Unavailable Path boss: ${beatId}`);
+  if (!success) return state;
+  state.nodeProgress![beatId] = { ...node, status: 'completed' };
+  if (!state.completedBeatIds.includes(beatId)) state.completedBeatIds.push(beatId);
+  state.activeBeatIds = [];
+  state.status = 'completed';
+  state.completedAt = at.toISOString();
+  return state;
+}
+
 export function setCurrentPathNode(
   path: PathDefinition,
   current: PathState,
@@ -288,14 +358,29 @@ export const pathProgressRatio = (path: PathDefinition, state?: PathState): numb
     ? 0
     : path.structure
       ? (() => {
-          const nodes = (path.beats ?? []).filter((beat) => beat.nodeKind === 'content');
-          const completed = nodes.filter((beat) => {
+          const contentNodes = (path.beats ?? []).filter((beat) => beat.nodeKind === 'content');
+          const bossNodes = (path.beats ?? []).filter((beat) => Boolean(beat.boss));
+          const completedContent = contentNodes.reduce((total, beat) => {
             const node = state.nodeProgress?.[beat.id];
-            return path.structure === 'verse'
-              ? Boolean(node?.levels?.learn)
-              : Boolean(node?.chapter?.readingCompleted && node.chapter.quizCompleted);
-          }).length;
-          return completed / Math.max(1, nodes.length);
+            if (path.structure === 'verse') return total + (node?.levels?.learn ? 1 : 0);
+            if (node?.chapter?.readingCompleted && node.chapter.quizCompleted) return total + 1;
+            const session = node?.chapter?.readingSession;
+            if (!session) return total;
+            return (
+              total +
+              readingSessionProgress(session, {
+                sectionIds: (beat.sections ?? []).map((section) => section.id),
+                recapCount: beat.reading?.recap.length ?? 0,
+              })
+            );
+          }, 0);
+          const completedBosses = bossNodes.filter(
+            (beat) => state.nodeProgress?.[beat.id]?.status === 'completed',
+          ).length;
+          return (
+            (completedContent + completedBosses) /
+            Math.max(1, contentNodes.length + bossNodes.length)
+          );
         })()
       : Math.max(0, Math.min(1, state.pathProgress / pathTarget(path)));
 
@@ -367,15 +452,19 @@ function applyStructuredPathActivity(
   let state =
     input.completion.type === 'verse-level'
       ? completeVersePathLevel(path, current, input.beatId, input.completion.level)
-      : completeChapterPathPart(path, current, input.beatId, input.completion.part);
+      : input.completion.type === 'chapter-part'
+        ? completeChapterPathPart(path, current, input.beatId, input.completion.part)
+        : completeBossChallenge(path, current, input.beatId, input.success === true, input.at);
   const node = state.nodeProgress?.[input.beatId];
   const changed =
     input.completion.type === 'verse-level'
       ? !beforeNode?.levels?.[input.completion.level] &&
         Boolean(node?.levels?.[input.completion.level])
-      : input.completion.part === 'reading'
+      : input.completion.type === 'chapter-part' && input.completion.part === 'reading'
         ? !beforeNode?.chapter?.readingCompleted && Boolean(node?.chapter?.readingCompleted)
-        : !beforeNode?.chapter?.quizCompleted && Boolean(node?.chapter?.quizCompleted);
+        : input.completion.type === 'chapter-part'
+          ? !beforeNode?.chapter?.quizCompleted && Boolean(node?.chapter?.quizCompleted)
+          : input.success === true && beforeNode?.status !== 'completed';
   const contentNodes = (path.beats ?? []).filter((beat) => beat.nodeKind === 'content');
   if (
     path.structure === 'chapter' &&

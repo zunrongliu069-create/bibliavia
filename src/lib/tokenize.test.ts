@@ -3,7 +3,7 @@ import {
   blankExercise,
   blankedText,
   initials,
-  lessonSectionForExercise,
+  lessonSectionForParts,
   recallAccuracy,
   shortRecallExercise,
   tokenize,
@@ -53,31 +53,46 @@ describe('language-aware exercises', () => {
   it('keeps short exercises short', () => {
     const verse = 'Trust in the LORD with all your heart and lean not on your own understanding';
     const gaps = blankExercise(verse, 'en', 0.65);
-    expect(gaps.prompt.match(/____/g)).toHaveLength(3);
-    expect(tokenize(gaps.answer, 'en')).toHaveLength(3);
+    expect(gaps.prompt.match(/____/g)!.length).toBeGreaterThan(3);
+    expect(tokenize(gaps.answer, 'en')).toHaveLength(gaps.prompt.match(/____/g)!.length);
     expect(
       tokenize(shortRecallExercise(verse, 'en', 'middle').phrase, 'en').length,
     ).toBeLessThanOrEqual(6);
   });
 
-  it('keeps short verses whole and divides long verses into manageable parts', () => {
+  it('keeps short verses whole and divides long verses at natural clauses', () => {
     expect(verseLearningChunks('The Lord is my shepherd.', 'en')).toEqual([
       'The Lord is my shepherd.',
     ]);
     const longVerse =
-      'Therefore you are without excuse whoever you are when you judge another because you condemn yourself by judging them while practicing the same things.';
+      'Paul, a servant of Jesus Christ, called to be an apostle, set apart for the Good News of God,';
     const chunks = verseLearningChunks(longVerse, 'en');
-    expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.every((chunk) => tokenize(chunk, 'en').length <= 9)).toBe(true);
+    expect(chunks).toEqual([
+      'Paul, a servant of Jesus Christ,',
+      'called to be an apostle,',
+      'set apart for the Good News of God,',
+    ]);
   });
 
-  it('practices long verses by parts before asking for the full verse', () => {
+  it('uses natural Chinese clauses even when the verse is short', () => {
+    expect(
+      verseLearningChunks('耶稣基督的仆人保罗，奉召为使徒，特派传神的福音。', 'zh-CN'),
+    ).toEqual(['耶稣基督的仆人保罗，', '奉召为使徒，', '特派传神的福音。']);
+  });
+
+  it('can select one phrase, connected phrases, or the full verse', () => {
     const longVerse =
-      'Therefore you are without excuse whoever you are when you judge another because you condemn yourself by judging them while practicing the same things.';
-    const first = lessonSectionForExercise(longVerse, 'en', 0);
-    const later = lessonSectionForExercise(longVerse, 'en', 9);
-    expect(first.fullVerse).toBe(false);
-    expect(first.text).not.toBe(longVerse);
-    expect(later).toMatchObject({ text: longVerse, fullVerse: true });
+      'Paul, a servant of Jesus Christ, called to be an apostle, set apart for the Good News of God,';
+    expect(lessonSectionForParts(longVerse, 'en', 1, 1)).toMatchObject({
+      text: 'Paul, a servant of Jesus Christ,',
+      fullVerse: false,
+    });
+    expect(lessonSectionForParts(longVerse, 'en', 1, 2).text).toBe(
+      'Paul, a servant of Jesus Christ, called to be an apostle,',
+    );
+    expect(lessonSectionForParts(longVerse, 'en')).toMatchObject({
+      text: longVerse,
+      fullVerse: true,
+    });
   });
 });

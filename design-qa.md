@@ -1,41 +1,57 @@
-# Bibliavia Path option 1 — visual QA
+# Design QA — Composed Mark Journey World
 
-- Source visual truth: `C:\Users\liuba\.codex\generated_images\01a02e2c-7087-7112-83e1-7b7fb2f66601\exec-897ffc59-905f-4fa8-a61a-99c8a715c77b.png`
-- Implementation screenshot: `C:\Users\liuba\Documents\ChatGPT\Memora\path-implementation-final.png`
-- Combined comparison: `C:\Users\liuba\Documents\ChatGPT\Memora\path-design-comparison.png`
-- Viewport/state: 390 × 844 CSS px, DPR 1, Simplified Chinese, Romans memorization Path started at Romans 1:1.
-- Pixel normalization: source 853 × 1844 scaled to 390 × 844; implementation captured at 390 × 844; comparison 780 × 844.
+- Source visual truth:
+  - `C:\Users\liuba\AppData\Local\Temp\codex-clipboard-fa778940-b463-4e11-9322-3eae58d02c56.png`
+  - `C:\Users\liuba\AppData\Local\Temp\codex-clipboard-8634dbd3-97c2-40d1-bb44-b5c57c120098.png`
+  - `C:\Users\liuba\.codex\attachments\1eddc59c-a811-4b31-82ab-28ab212559d1\已粘贴的文本.txt`
+- Source role: visual direction plus the non-negotiable composed-world architecture; not a pixel-copy target.
+- Implementation evidence: browser-rendered captures from `http://localhost:8081/`, in-app browser tab 6. The browser connector displayed the captures inline but did not expose a persistent screenshot filepath.
+- Phone viewport: 390 × 844 CSS pixels, device scale factor 1.5. The viewport was reloaded after resizing and reset after QA.
+- State: persisted Mark 3 first section current, Mark 1–2 completed, Mark 3–5 future.
 
-## Full-view comparison
+## Full-view comparison evidence
 
-- Hierarchy matches: dark purple/gold book header, chapter progress, illustrated Roman road, current/locked/discovery nodes, next-lesson panel, gold primary action and compact bottom navigation.
-- Fonts: Georgia-style display hierarchy and heavy UI labels match the target's classical game tone; Chinese localization necessarily uses platform glyph fallbacks.
-- Spacing: primary action and navigation remain visible without scrolling; nodes follow the painted road and do not overlap the lesson panel.
-- Colors: purple, antique gold, mint and cream map closely to the source; the existing global HUD and cream app frame are intentional product-shell constraints.
-- Imagery: the existing high-resolution Roman world asset matches the selected direction and is not replaced by CSS/SVG imitation.
-- Copy: localized Romans 1:1/1:2 content is internally consistent. Activity labels replace generic node numbers so each node remains actionable.
-- Focused-region comparison was unnecessary: the normalized 390 × 844 side-by-side image keeps header, nodes, CTA and navigation readable.
+- Mark remains a 3,822 px vertical world inside a bounded, natively scrolling Journey viewport.
+- The environment contains no Mark raster images, full-size `<img>`, or environment `background-image`.
+- Terrain, water, shoreline, vegetation, buildings, foreground props, route, nodes, Traveler, landmarks, labels, and fog are independently rendered objects.
+- Mark 1–5 read as one geography: lower shoreline and fishing boat, road into settlement, denser town/courtyard, fields and olives, lake crossing, rocky opposite shore, and settlement ahead.
+- Rounded overlapping terrain and water areas avoid rectangular chapter wallpaper boundaries.
+- Future landmark objects remain faintly visible through dynamic fog, while completed locations remain below and revisitable.
 
-## Interaction evidence
+## Focused evidence
 
-- Path tab opens correctly.
-- Start Path updates the Path state and reveals the localized continuation action.
-- Continuation opens the Romans 1:1 lesson intro; closing returns to Path.
-- Read/Recall/Review retain their existing handlers and locked/completed semantics.
-- No new console error appeared after the clean reload. Existing React Native Web shadow deprecation warnings remain.
+- Raster-off acceptance: all five generated Mark environment images and their image-loading code were removed. The browser still clearly showed terrain changes, water, shoreline, road, trees, rocks, buildings, landmark labels, Traveler, completed route, and future direction.
+- Upward phone scroll reached the fogged Mark 5 opposite-shore settlement.
+- Downward phone scroll reached the completed Mark 1 shoreline and independently positioned fishing-shore landmark.
+- Reload returned to the persisted current Mark 3 node and Traveler location.
+- Activating `A hand restored` opened the existing Mark 3 Reading flow, proving the environment does not intercept node hit areas.
+- Reduce Motion was enabled, Journey re-opened successfully with a correctly positioned Traveler, then the original preference was restored.
+- No progression state was changed during visual navigation.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing Bibliavia typography and compact mobile hierarchy remain; no reference typography was copied.
+- Spacing and layout rhythm: the world fills the usable Journey area, HUD and tabs remain fixed, and all environment objects scroll in the world coordinate system.
+- Colors and tokens: warm sand, field, olive, stone, and lake tokens create region identity without chapter cards.
+- Image quality and asset fidelity: Mark uses no environment images. Small reusable CSS/DOM primitives make the world understandable independently of any art asset.
+- Copy and content: real editorial Mark section titles remain; landmark labels describe physical destinations rather than gameplay state.
 
 ## Comparison history
 
-1. P1 — first implementation targeted unused `CampaignScreen`.
-   - Restored that file and moved the design into the active `PathGameWorld` used by `JourneyScreen`.
-2. P1 — an unstarted Romans Path displayed the global Genesis fallback.
-   - The first beat now becomes the initial Path beat, yielding Romans 1:1 and Romans 1:2.
-3. P2 — the CTA fell below the mobile viewport.
-   - Reduced the world height and tightened the bottom lesson panel; CTA and navigation now remain visible.
+### Iteration 1 — blocked
+
+- P0 architecture: five large chapter-sized generated landscape images still functioned as wallpaper under route and nodes.
+- Fix: removed every Mark landscape file, all image imports/requirements, crossfade masks, and chapter art configuration.
+
+### Iteration 2 — passed
+
+- Replaced wallpaper with typed world-object configuration and reusable composed primitives.
+- Moved the Traveler beside the current node label and clamped landmark objects within world bounds.
+- Post-fix mobile evidence confirms bidirectional scrolling, current-position restoration, independent landmarks, readable node states, working hit areas, dynamic fog, and no raster dependency.
+- No actionable P0/P1/P2 findings remain.
 
 ## Follow-up polish
 
-- P3: migrate deprecated React Native Web shadow props separately; unrelated screens currently share them.
-- P3: add motion/haptics/audio only after the static Path direction is approved in use.
+- P3: reusable trees, houses, rocks, grass, and boats can receive richer small-asset illustration later without changing the composed-world architecture.
 
 final result: passed

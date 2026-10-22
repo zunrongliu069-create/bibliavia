@@ -17,18 +17,83 @@ export const adaptiveSequence: ExerciseMode[] = [
   'context',
 ];
 
-export const lessonModes: ExerciseMode[] = [
-  'read',
-  'listen',
-  'finish',
-  'choice',
-  'sentenceCheck',
-  'reorder',
-  'initials',
-  'keywords',
-  'speak',
-  'recall',
-];
+export type LessonStageIndex = 0 | 1 | 2;
+export type LessonScope = 'full' | 'structure' | 'chunk' | 'cumulative';
+
+export interface LessonStep {
+  mode: ExerciseMode;
+  stage: LessonStageIndex;
+  scope: LessonScope;
+  partStart?: number;
+  partEnd?: number;
+  gate?: boolean;
+  minimumAccuracy?: number;
+}
+
+export function createLessonPlan(partCount: number): LessonStep[] {
+  const count = Math.max(1, partCount);
+  const learn: LessonStep[] = [{ mode: 'read', stage: 0, scope: 'full' }];
+  if (count > 1) learn.push({ mode: 'read', stage: 0, scope: 'structure' });
+  for (let part = 1; part <= count; part += 1) {
+    learn.push({ mode: 'blanks', stage: 0, scope: 'chunk', partStart: part, partEnd: part });
+    if (part > 1)
+      learn.push({ mode: 'blanks', stage: 0, scope: 'cumulative', partStart: 1, partEnd: part });
+  }
+  learn.push({
+    mode: 'initials',
+    stage: 0,
+    scope: 'full',
+    gate: true,
+    minimumAccuracy: 0.55,
+  });
+  return [
+    ...learn,
+    { mode: 'moreBlanks', stage: 1, scope: 'full' },
+    { mode: 'reorder', stage: 1, scope: 'full' },
+    {
+      mode: 'recall',
+      stage: 1,
+      scope: 'full',
+      gate: true,
+      minimumAccuracy: 0.75,
+    },
+    { mode: 'initials', stage: 2, scope: 'full' },
+    {
+      mode: 'recall',
+      stage: 2,
+      scope: 'full',
+      gate: true,
+      minimumAccuracy: 0.9,
+    },
+  ];
+}
+
+export const lessonStageStart = (plan: LessonStep[], stage: LessonStageIndex) =>
+  Math.max(
+    0,
+    plan.findIndex((step) => step.stage === stage),
+  );
+
+export const lessonStageForPlanExercise = (plan: LessonStep[], index: number) =>
+  plan[Math.max(0, Math.min(plan.length - 1, index))]?.stage ?? 0;
+
+export const isLessonPlanStageEnd = (plan: LessonStep[], nextIndex: number) =>
+  nextIndex >= plan.length || plan[nextIndex - 1]?.stage !== plan[nextIndex]?.stage;
+
+export const lessonLevelForPlanEnd = (plan: LessonStep[], nextIndex: number) => {
+  const stage = plan[Math.max(0, nextIndex - 1)]?.stage ?? 0;
+  return stage === 0
+    ? ('learn' as const)
+    : stage === 1
+      ? ('practice' as const)
+      : ('master' as const);
+};
+
+export const mustRetryLessonStep = (
+  step: LessonStep,
+  grade: import('../types').ReviewGrade,
+  accuracy: number,
+) => Boolean(step.gate && (grade === 'again' || accuracy < (step.minimumAccuracy ?? 0.55)));
 
 export function recommendedMode(mastery?: Mastery): ExerciseMode {
   if (!mastery) return 'read';

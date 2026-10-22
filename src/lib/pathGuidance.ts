@@ -1,6 +1,7 @@
 import { beatTitle } from '../data/paths';
 import type { PathActivityType, PathDefinition, PathState, UiLanguage } from '../types';
 import { nextPathBeat, pathProgressRatio } from './pathProgress';
+import { readingNextStep } from './readingFlow';
 
 export interface PathNextAction {
   activity: PathActivityType | 'complete';
@@ -40,6 +41,21 @@ const labels: Record<UiLanguage, Record<PathActivityType | 'complete', string>> 
   },
 };
 
+const readingStepLabel = (
+  language: UiLanguage,
+  kind: 'section' | 'recap',
+  position: number,
+  total?: number,
+) => {
+  const names: Record<UiLanguage, { section: string; recap: string }> = {
+    en: { section: 'Section', recap: 'Chapter recap' },
+    sv: { section: 'Avsnitt', recap: 'Kapitelrecap' },
+    'zh-Hans': { section: '阅读段落', recap: '章节回顾' },
+    'zh-Hant': { section: '閱讀段落', recap: '章節回顧' },
+  };
+  return `${names[language][kind]} ${position}${total ? ` of ${total}` : ''}`;
+};
+
 const activityWasUsed = (
   state: PathState | undefined,
   beatId: string,
@@ -63,6 +79,40 @@ export function nextPathAction(
   }
   const beat = nextPathBeat(path, state) ?? path.beats?.[0];
   let activity: PathActivityType = path.kind === 'memorization' ? 'memorization' : 'reading';
+  const readingSession = beat ? state?.nodeProgress?.[beat.id]?.chapter?.readingSession : undefined;
+  if (path.structure === 'chapter' && readingSession && readingSession.phase !== 'complete') {
+    const nextStep = readingNextStep(readingSession, {
+      sectionIds: (beat?.sections ?? []).map((section) => section.id),
+      recapCount: beat?.reading?.recap.length ?? 0,
+    });
+    const detail =
+      nextStep.kind === 'recap'
+        ? readingStepLabel(language, 'recap', nextStep.position ?? 1)
+        : nextStep.kind === 'section'
+          ? readingStepLabel(language, 'section', nextStep.position ?? 1, beat?.sections?.length)
+          : readingSession.phase === 'recap' && !beat?.reading?.recap.length
+            ? readingStepLabel(
+                language,
+                'recap',
+                readingSession.recapIndex + (readingSession.answerState === 'correct' ? 2 : 1),
+              )
+            : beat
+              ? beatTitle(beat, language)
+              : path.title;
+    return { activity: 'reading', label: labels[language].reading, detail, beatId: beat?.id };
+  }
+  if (
+    path.structure === 'chapter' &&
+    beat?.sections?.length &&
+    state?.nodeProgress?.[beat.id]?.chapter?.readingCompleted &&
+    !state.nodeProgress[beat.id]?.chapter?.quizCompleted
+  )
+    return {
+      activity: 'reading',
+      label: labels[language].reading,
+      detail: readingStepLabel(language, 'recap', 1),
+      beatId: beat.id,
+    };
   if (
     path.structure === 'chapter' &&
     beat &&

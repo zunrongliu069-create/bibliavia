@@ -34,4 +34,6 @@ for (const file of bundleFiles) {
   await writeFile(bundlePath, updatedBundle);
 }
 
+await writeFile(path.join(outputDirectory, '_redirects'), '/* /index.html 200\n');
+
 console.log(`Prepared ${fontFiles.length} icon fonts for Cloudflare Pages.`);

@@ -1,22 +1,28 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Button, Card, ProgressBar } from '../components/ui';
-import { translations } from '../data/content';
+import { BottomNavigation, Button, Card, ProgressBar } from '../components/ui';
+import { getReferencedPassage, translations } from '../data/content';
+import { beatTitle, pathById } from '../data/paths';
+import { readingChapterForBeat } from '../data/readingChapters';
 import { t } from '../lib/i18n';
+import { readingNextAction } from '../lib/readingNavigation';
 import { uiText } from '../lib/uiText';
 import { colors, radius } from '../theme';
 import type { Verse } from '../types';
 import { useAppStore } from '../store/AppStore';
+import { ReadingChapterScreen } from './ReadingChapterScreen';
 
 export function LibraryScreen({
   onStart,
   initialPassage,
   onBack,
+  onContinueReading,
 }: {
   onStart: (verse: Verse) => void;
   initialPassage?: { label: string; verses: Verse[] } | null;
   onBack?: () => void;
+  onContinueReading?: (verses: Verse[]) => void;
 }) {
   const store = useAppStore();
   const u = (text: string) => uiText(store.uiLanguage, text);
@@ -65,6 +71,33 @@ export function LibraryScreen({
         .filter((passage) => passage.length),
     [passages, selectedVerse],
   );
+  const nextChapter = chapters.find((item) => item > chapter);
+  const focusedPath = store.progress.focusedPathId
+    ? pathById(store.progress.focusedPathId)
+    : undefined;
+  const planVerse = planPassage?.verses[0];
+  const planBeatId = planVerse ? `${planVerse.bookId}-${planVerse.chapter}` : undefined;
+  const planBeatIndex = planBeatId
+    ? (focusedPath?.beats?.findIndex((beat) => beat.id === planBeatId) ?? -1)
+    : -1;
+  const planBeat = planBeatIndex >= 0 ? focusedPath?.beats?.[planBeatIndex] : undefined;
+  const readingChapter = planBeat ? readingChapterForBeat(planBeat.id) : undefined;
+  const nextPlanBeat =
+    planBeatIndex >= 0
+      ? focusedPath?.beats
+          ?.slice(planBeatIndex + 1)
+          .find((beat) => beat.nodeKind === 'content' && beat.passage)
+      : undefined;
+  const planNode =
+    focusedPath && planBeatId
+      ? store.progress.pathStates?.[focusedPath.id]?.nodeProgress?.[planBeatId]
+      : undefined;
+  const hasChapterQuiz = Boolean(focusedPath?.structure === 'chapter' && planBeat);
+  const planNextAction = readingNextAction({
+    hasChapterQuiz,
+    quizCompleted: Boolean(planNode?.chapter?.quizCompleted),
+    hasNextChapter: Boolean(nextPlanBeat),
+  });
   const readCount = available.filter((verse) => store.progress.readVerseIds[verse.id]).length;
   const hasEnglishRomansAudio =
     Platform.OS === 'web' &&
@@ -134,9 +167,34 @@ export function LibraryScreen({
       synth.speak(utterance);
     });
   };
+  if (planPassage && readingChapter && focusedPath && planBeat)
+    return (
+      <ReadingChapterScreen
+        pathId={focusedPath.id}
+        beatId={planBeat.id}
+        title={beatTitle(planBeat, store.uiLanguage)}
+        chapter={readingChapter}
+        verses={
+          planBeat.passage
+            ? getReferencedPassage(store.translationId, planBeat.passage)
+            : planPassage.verses
+        }
+        hasNextChapter={Boolean(nextPlanBeat?.passage)}
+        onBackToPath={() => (onBack ? onBack() : setPlanPassage(null))}
+        onNextChapter={() => {
+          if (!nextPlanBeat?.passage) return onBack?.();
+          const verses = getReferencedPassage(store.translationId, nextPlanBeat.passage);
+          if (verses.length)
+            setPlanPassage({
+              label: beatTitle(nextPlanBeat, store.uiLanguage),
+              verses,
+            });
+        }}
+      />
+    );
   if (planPassage)
     return (
-      <ScrollView contentContainerStyle={[styles.page, styles.planReader]}>
+      <ScrollView key={planPassage.label} contentContainerStyle={[styles.page, styles.planReader]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={u('Back to Path')}
@@ -185,6 +243,32 @@ export function LibraryScreen({
               onPress={() => planPassage.verses[0] && onStart(planPassage.verses[0])}
             />
           </View>
+          <BottomNavigation
+            backLabel={u('Back to Path')}
+            continueLabel={
+              planNextAction === 'next-chapter'
+                ? `${u('Next Chapter')} →`
+                : `${t(store.uiLanguage, 'continue')} →`
+            }
+            onBack={() => (onBack ? onBack() : setPlanPassage(null))}
+            onContinue={() => {
+              if (planNextAction === 'quiz') {
+                store.recordReading(planPassage.verses);
+                onContinueReading?.(planPassage.verses);
+                return;
+              }
+              if (planNextAction === 'next-chapter' && nextPlanBeat?.passage) {
+                const verses = getReferencedPassage(store.translationId, nextPlanBeat.passage);
+                if (verses.length)
+                  setPlanPassage({
+                    label: beatTitle(nextPlanBeat, store.uiLanguage),
+                    verses,
+                  });
+                return;
+              }
+              onBack?.();
+            }}
+          />
         </View>
       </ScrollView>
     );
@@ -437,6 +521,20 @@ export function LibraryScreen({
         <Card>
           <Text style={styles.empty}>{u('Bible text unavailable for this version.')}</Text>
         </Card>
+      )}
+      {showBibleText && chapterVerses.length > 0 && (
+        <BottomNavigation
+          backLabel={u('Back')}
+          continueLabel={nextChapter ? `${u('Next Chapter')} →` : u('Complete')}
+          onBack={() => setShowBibleText(false)}
+          onContinue={() => {
+            store.recordReading(chapterVerses);
+            if (nextChapter) {
+              chooseChapter(nextChapter);
+              setShowBibleText(true);
+            } else setShowBibleText(false);
+          }}
+        />
       )}
     </ScrollView>
   );
